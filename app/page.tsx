@@ -61,15 +61,10 @@ const SAMPLE_TASKS: Task[] = [
 // COMPONENTS
 // ============================================
 
-const GlassCard = ({ children, className = '', hover = true }: { children: React.ReactNode; className?: string; hover?: boolean }) => (
-  <motion.div
-    className={`glass-card relative overflow-hidden rounded-2xl ${className}`}
-    whileHover={hover ? { scale: 1.02 } : {}}
-    transition={{ duration: 0.2 }}
-  >
-    <div className="glass-shimmer absolute inset-0 pointer-events-none" />
+const GlassCard = ({ children, className = '' }: { children: React.ReactNode; className?: string }) => (
+  <div className={`glass-card relative overflow-hidden rounded-2xl ${className}`}>
     <div className="relative z-10">{children}</div>
-  </motion.div>
+  </div>
 )
 
 const StatCard = ({ icon, label, value, subtitle, color }: { icon: string; label: string; value: string | number; subtitle?: string; color: string }) => (
@@ -90,18 +85,15 @@ const StatCard = ({ icon, label, value, subtitle, color }: { icon: string; label
   </GlassCard>
 )
 
-const TaskCard = ({ task, onClick }: { task: Task; onClick: () => void }) => {
+const TaskCard = ({ task, onClick, onDragStart }: { task: Task; onClick: () => void; onDragStart?: (e: React.DragEvent) => void }) => {
   const isOverdue = task.dueDate && new Date(task.dueDate) < new Date()
 
   return (
-    <motion.div
-      layout
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, scale: 0.9 }}
-      whileHover={{ y: -4, boxShadow: '0 20px 40px rgba(0,0,0,0.3)' }}
+    <div
+      draggable={!!onDragStart}
+      onDragStart={onDragStart}
       onClick={onClick}
-      className="glass-task cursor-pointer rounded-xl p-4 mb-3"
+      className="glass-task cursor-pointer rounded-xl p-4 mb-3 hover:bg-white/10 transition-colors duration-75"
       style={{ border: `1px solid ${PRIORITY_CONFIG[task.priority].color}30` }}
     >
       <div className="flex items-start justify-between mb-3">
@@ -133,26 +125,38 @@ const TaskCard = ({ task, onClick }: { task: Task; onClick: () => void }) => {
           </span>
         )}
       </div>
-    </motion.div>
+    </div>
   )
 }
 
-const KanbanColumn = ({ status, tasks, onTaskClick }: { status: TaskStatus; tasks: Task[]; onTaskClick: (task: Task) => void }) => (
+const KanbanColumn = ({ status, tasks, onTaskClick, onDrop, onDragOver, onDragStart }: {
+  status: TaskStatus;
+  tasks: Task[];
+  onTaskClick: (task: Task) => void;
+  onDrop?: (e: React.DragEvent) => void;
+  onDragOver?: (e: React.DragEvent) => void;
+  onDragStart?: (e: React.DragEvent, taskId: string) => void;
+}) => (
   <div className="flex-1 min-w-[280px] max-w-[320px]">
     <div className="flex items-center gap-3 mb-4 px-2">
-      <div className="w-3 h-3 rounded-full animate-pulse" style={{ background: STATUS_CONFIG[status].color, boxShadow: `0 0 10px ${STATUS_CONFIG[status].color}` }} />
+      <div className="w-3 h-3 rounded-full" style={{ background: STATUS_CONFIG[status].color, boxShadow: `0 0 10px ${STATUS_CONFIG[status].color}` }} />
       <h3 className="font-semibold text-white">{STATUS_CONFIG[status].label}</h3>
       <span className="text-sm px-2 py-0.5 rounded-full bg-white/10 text-gray-400 ml-auto">{tasks.length}</span>
     </div>
     <div
-      className="rounded-2xl p-3 min-h-[500px]"
+      onDrop={onDrop}
+      onDragOver={onDragOver}
+      className="rounded-2xl p-3 min-h-[500px] transition-colors duration-75"
       style={{ background: STATUS_CONFIG[status].bg, border: `1px solid ${STATUS_CONFIG[status].color}20` }}
     >
-      <AnimatePresence>
-        {tasks.map(task => (
-          <TaskCard key={task.id} task={task} onClick={() => onTaskClick(task)} />
-        ))}
-      </AnimatePresence>
+      {tasks.map(task => (
+        <TaskCard
+          key={task.id}
+          task={task}
+          onClick={() => onTaskClick(task)}
+          onDragStart={onDragStart ? (e) => onDragStart(e, task.id) : undefined}
+        />
+      ))}
       {tasks.length === 0 && (
         <div className="text-center text-gray-500 py-12 border-2 border-dashed border-white/10 rounded-xl">
           Drop tasks here
@@ -180,27 +184,23 @@ const CalendarView = ({ tasks }: { tasks: Task[] }) => {
   }
 
   return (
-    <GlassCard className="p-6" hover={false}>
+    <GlassCard className="p-6" >
       <div className="flex items-center justify-between mb-6">
-        <motion.button
-          whileHover={{ scale: 1.1 }}
-          whileTap={{ scale: 0.9 }}
+        <button
           onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1))}
-          className="p-3 rounded-xl bg-white/10 hover:bg-white/20 transition-colors text-white"
+          className="p-3 rounded-xl bg-white/10 hover:bg-white/20 transition-colors duration-75 text-white"
         >
           ← Prev
-        </motion.button>
+        </button>
         <h3 className="text-2xl font-bold text-white">
           {currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
         </h3>
-        <motion.button
-          whileHover={{ scale: 1.1 }}
-          whileTap={{ scale: 0.9 }}
+        <button
           onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1))}
-          className="p-3 rounded-xl bg-white/10 hover:bg-white/20 transition-colors text-white"
+          className="p-3 rounded-xl bg-white/10 hover:bg-white/20 transition-colors duration-75 text-white"
         >
           Next →
-        </motion.button>
+        </button>
       </div>
 
       <div className="grid grid-cols-7 gap-2 mb-4">
@@ -216,10 +216,9 @@ const CalendarView = ({ tasks }: { tasks: Task[] }) => {
           const isToday = new Date().getDate() === day && new Date().getMonth() === currentDate.getMonth()
 
           return (
-            <motion.div
+            <div
               key={i}
-              whileHover={{ scale: 1.05, background: 'rgba(255,255,255,0.1)' }}
-              className={`aspect-square rounded-xl p-2 cursor-pointer transition-all border ${
+              className={`aspect-square rounded-xl p-2 cursor-pointer transition-colors duration-75 border hover:bg-white/5 ${
                 isToday
                   ? 'bg-gradient-to-br from-blue-500/30 to-cyan-500/30 border-blue-500 shadow-lg shadow-blue-500/20'
                   : 'border-transparent hover:border-white/20'
@@ -240,7 +239,7 @@ const CalendarView = ({ tasks }: { tasks: Task[] }) => {
                   <div className="text-xs text-gray-500">+{dayTasks.length - 2}</div>
                 )}
               </div>
-            </motion.div>
+            </div>
           )
         })}
       </div>
@@ -249,7 +248,7 @@ const CalendarView = ({ tasks }: { tasks: Task[] }) => {
 }
 
 const ListView = ({ tasks, onTaskClick }: { tasks: Task[]; onTaskClick: (task: Task) => void }) => (
-  <GlassCard className="overflow-hidden" hover={false}>
+  <GlassCard className="overflow-hidden" >
     <div className="overflow-x-auto">
       <table className="w-full">
         <thead>
@@ -262,15 +261,11 @@ const ListView = ({ tasks, onTaskClick }: { tasks: Task[]; onTaskClick: (task: T
           </tr>
         </thead>
         <tbody>
-          {tasks.map((task, index) => (
-            <motion.tr
+          {tasks.map((task) => (
+            <tr
               key={task.id}
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: index * 0.05 }}
-              whileHover={{ background: 'rgba(255,255,255,0.05)' }}
               onClick={() => onTaskClick(task)}
-              className="border-b border-white/5 cursor-pointer"
+              className="border-b border-white/5 cursor-pointer hover:bg-white/5 transition-colors duration-75"
             >
               <td className="p-4">
                 <div className="font-medium text-white">{task.title}</div>
@@ -304,7 +299,7 @@ const ListView = ({ tasks, onTaskClick }: { tasks: Task[]; onTaskClick: (task: T
                 )}
               </td>
               <td className="p-4 text-gray-400">{task.dueDate || '-'}</td>
-            </motion.tr>
+            </tr>
           ))}
         </tbody>
       </table>
@@ -316,9 +311,47 @@ const ListView = ({ tasks, onTaskClick }: { tasks: Task[]; onTaskClick: (task: T
 // MAIN APP
 // ============================================
 export default function ProjectManager() {
-  const [tasks] = useState<Task[]>(SAMPLE_TASKS)
+  const [tasks, setTasks] = useState<Task[]>(SAMPLE_TASKS)
   const [viewMode, setViewMode] = useState<ViewMode>('dashboard')
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
+  const [showAddModal, setShowAddModal] = useState(false)
+  const [newTask, setNewTask] = useState({ title: '', description: '', priority: 'medium' as Priority, assignee: '' as Agent | '', status: 'todo' as TaskStatus })
+
+  const addTask = () => {
+    if (!newTask.title.trim()) return
+    const task: Task = {
+      id: Date.now().toString(),
+      title: newTask.title,
+      description: newTask.description,
+      status: newTask.status,
+      priority: newTask.priority,
+      assignee: newTask.assignee || null,
+      dueDate: null,
+      tags: [],
+      createdAt: new Date().toISOString().split('T')[0]
+    }
+    setTasks([task, ...tasks])
+    setNewTask({ title: '', description: '', priority: 'medium', assignee: '', status: 'todo' })
+    setShowAddModal(false)
+  }
+
+  const updateTaskStatus = (taskId: string, newStatus: TaskStatus) => {
+    setTasks(tasks.map(t => t.id === taskId ? { ...t, status: newStatus } : t))
+  }
+
+  const handleDragStart = (e: React.DragEvent, taskId: string) => {
+    e.dataTransfer.setData('taskId', taskId)
+  }
+
+  const handleDrop = (e: React.DragEvent, status: TaskStatus) => {
+    e.preventDefault()
+    const taskId = e.dataTransfer.getData('taskId')
+    if (taskId) updateTaskStatus(taskId, status)
+  }
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+  }
 
   const stats = useMemo(() => ({
     total: tasks.length,
@@ -335,32 +368,16 @@ export default function ProjectManager() {
 
   return (
     <div className="min-h-screen p-8" style={{ background: 'linear-gradient(135deg, #0a0a1a 0%, #1a1a3e 50%, #0a0a1a 100%)' }}>
-      {/* Animated background orbs */}
+      {/* Static background orbs - no animation for performance */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
-        <motion.div
-          animate={{ x: [0, 100, 0], y: [0, -50, 0] }}
-          transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
-          className="orb orb-blue top-1/4 left-1/4 w-96 h-96"
-        />
-        <motion.div
-          animate={{ x: [0, -80, 0], y: [0, 80, 0] }}
-          transition={{ duration: 25, repeat: Infinity, ease: "linear" }}
-          className="orb orb-purple bottom-1/4 right-1/4 w-96 h-96"
-        />
-        <motion.div
-          animate={{ x: [0, 50, 0], y: [0, 100, 0] }}
-          transition={{ duration: 30, repeat: Infinity, ease: "linear" }}
-          className="orb orb-cyan top-1/2 right-1/3 w-64 h-64"
-        />
+        <div className="orb orb-blue top-1/4 left-1/4 w-96 h-96" />
+        <div className="orb orb-purple bottom-1/4 right-1/4 w-96 h-96" />
+        <div className="orb orb-cyan top-1/2 right-1/3 w-64 h-64" />
       </div>
 
       <div className="relative z-10 max-w-7xl mx-auto">
         {/* Header */}
-        <motion.div
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="flex flex-col lg:flex-row items-start lg:items-center justify-between mb-8 gap-4"
-        >
+        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between mb-8 gap-4">
           <div>
             <h1 className="text-4xl lg:text-5xl font-bold gradient-title">
               Project Management
@@ -370,19 +387,17 @@ export default function ProjectManager() {
 
           <div className="flex items-center gap-4 flex-wrap">
             {/* View Mode Tabs */}
-            <GlassCard className="p-1.5 flex gap-1" hover={false}>
+            <GlassCard className="p-1.5 flex gap-1" >
               {[
                 { key: 'dashboard', icon: '📊', label: 'Dashboard' },
                 { key: 'kanban', icon: '📋', label: 'Kanban' },
                 { key: 'calendar', icon: '📅', label: 'Calendar' },
                 { key: 'list', icon: '📝', label: 'List' }
               ].map(({ key, icon, label }) => (
-                <motion.button
+                <button
                   key={key}
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
                   onClick={() => setViewMode(key as ViewMode)}
-                  className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-all flex items-center gap-2 ${
+                  className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-colors duration-75 flex items-center gap-2 ${
                     viewMode === key
                       ? 'tab-active text-white'
                       : 'text-gray-400 hover:text-white hover:bg-white/10'
@@ -390,24 +405,23 @@ export default function ProjectManager() {
                 >
                   <span>{icon}</span>
                   <span className="hidden sm:inline">{label}</span>
-                </motion.button>
+                </button>
               ))}
             </GlassCard>
 
             {/* Add Task Button */}
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              className="btn-gradient px-6 py-3 rounded-xl font-medium text-white"
+            <button
+              onClick={() => setShowAddModal(true)}
+              className="btn-gradient px-6 py-3 rounded-xl font-medium text-white hover:opacity-90 transition-opacity duration-75"
             >
               + Add Task
-            </motion.button>
+            </button>
           </div>
-        </motion.div>
+        </div>
 
         {/* Dashboard View */}
         {viewMode === 'dashboard' && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-8">
+          <div className="space-y-8">
             {/* Stats Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
               <StatCard icon="📋" label="Total" value={stats.total} subtitle="All tasks" color="#3B82F6" />
@@ -482,56 +496,42 @@ export default function ProjectManager() {
             </div>
 
             {/* Recent Tasks */}
-            <GlassCard className="p-6" hover={false}>
+            <GlassCard className="p-6" >
               <h3 className="text-lg font-semibold text-white mb-5">Recent Tasks</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {tasks.slice(0, 6).map((task, index) => (
-                  <motion.div
-                    key={task.id}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: index * 0.1 }}
-                  >
-                    <TaskCard task={task} onClick={() => setSelectedTask(task)} />
-                  </motion.div>
+                {tasks.slice(0, 6).map((task) => (
+                  <TaskCard key={task.id} task={task} onClick={() => setSelectedTask(task)} />
                 ))}
               </div>
             </GlassCard>
-          </motion.div>
+          </div>
         )}
 
         {/* Kanban View */}
         {viewMode === 'kanban' && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex gap-6 overflow-x-auto pb-4">
-            {(Object.keys(STATUS_CONFIG) as TaskStatus[]).map((status, index) => (
-              <motion.div
+          <div className="flex gap-6 overflow-x-auto pb-4">
+            {(Object.keys(STATUS_CONFIG) as TaskStatus[]).map((status) => (
+              <KanbanColumn
                 key={status}
-                initial={{ opacity: 0, x: 50 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: index * 0.1 }}
-              >
-                <KanbanColumn
-                  status={status}
-                  tasks={tasksByStatus[status]}
-                  onTaskClick={setSelectedTask}
-                />
-              </motion.div>
+                status={status}
+                tasks={tasksByStatus[status]}
+                onTaskClick={setSelectedTask}
+                onDrop={(e) => handleDrop(e, status)}
+                onDragOver={handleDragOver}
+                onDragStart={handleDragStart}
+              />
             ))}
-          </motion.div>
+          </div>
         )}
 
         {/* Calendar View */}
         {viewMode === 'calendar' && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-            <CalendarView tasks={tasks} />
-          </motion.div>
+          <CalendarView tasks={tasks} />
         )}
 
         {/* List View */}
         {viewMode === 'list' && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-            <ListView tasks={tasks} onTaskClick={setSelectedTask} />
-          </motion.div>
+          <ListView tasks={tasks} onTaskClick={setSelectedTask} />
         )}
 
         {/* Task Detail Modal */}
@@ -551,7 +551,7 @@ export default function ProjectManager() {
                 onClick={e => e.stopPropagation()}
                 className="w-full max-w-lg"
               >
-                <GlassCard className="p-8" hover={false}>
+                <GlassCard className="p-8" >
                   <div className="flex items-start justify-between mb-6">
                     <div>
                       <div className="flex items-center gap-2 mb-3">
@@ -567,14 +567,12 @@ export default function ProjectManager() {
                       </div>
                       <h2 className="text-2xl font-bold text-white">{selectedTask.title}</h2>
                     </div>
-                    <motion.button
-                      whileHover={{ scale: 1.1, rotate: 90 }}
-                      whileTap={{ scale: 0.9 }}
+                    <button
                       onClick={() => setSelectedTask(null)}
-                      className="text-gray-400 hover:text-white text-3xl w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/10"
+                      className="text-gray-400 hover:text-white text-3xl w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/10 transition-colors duration-75"
                     >
                       ×
-                    </motion.button>
+                    </button>
                   </div>
 
                   <p className="text-gray-300 mb-6 text-lg">{selectedTask.description}</p>
@@ -611,26 +609,125 @@ export default function ProjectManager() {
                   </div>
 
                   <div className="flex gap-3">
-                    <motion.button
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                      className="btn-gradient flex-1 py-3.5 rounded-xl font-medium text-white"
-                    >
+                    <button className="btn-gradient flex-1 py-3.5 rounded-xl font-medium text-white hover:opacity-90 transition-opacity duration-75">
                       Edit Task
-                    </motion.button>
-                    <motion.button
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                      className="px-6 py-3.5 rounded-xl bg-red-500/20 text-red-400 font-medium hover:bg-red-500/30 transition-colors"
-                    >
+                    </button>
+                    <button className="px-6 py-3.5 rounded-xl bg-red-500/20 text-red-400 font-medium hover:bg-red-500/30 transition-colors duration-75">
                       Delete
-                    </motion.button>
+                    </button>
                   </div>
                 </GlassCard>
               </motion.div>
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* Add Task Modal */}
+        {showAddModal && (
+          <div
+            className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-50 p-4"
+            onClick={() => setShowAddModal(false)}
+          >
+            <div
+              onClick={e => e.stopPropagation()}
+              className="w-full max-w-lg"
+            >
+              <GlassCard className="p-8" >
+                <div className="flex items-center justify-between mb-6">
+                  <h2 className="text-2xl font-bold text-white">Add New Task</h2>
+                  <button
+                    onClick={() => setShowAddModal(false)}
+                    className="text-gray-400 hover:text-white text-3xl w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/10 transition-colors duration-75"
+                  >
+                    ×
+                  </button>
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm text-gray-400 mb-2">Title *</label>
+                    <input
+                      type="text"
+                      value={newTask.title}
+                      onChange={e => setNewTask({ ...newTask, title: e.target.value })}
+                      placeholder="Enter task title..."
+                      className="w-full p-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm text-gray-400 mb-2">Description</label>
+                    <textarea
+                      value={newTask.description}
+                      onChange={e => setNewTask({ ...newTask, description: e.target.value })}
+                      placeholder="Enter description..."
+                      rows={3}
+                      className="w-full p-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500 resize-none"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm text-gray-400 mb-2">Priority</label>
+                      <select
+                        value={newTask.priority}
+                        onChange={e => setNewTask({ ...newTask, priority: e.target.value as Priority })}
+                        className="w-full p-3 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none focus:border-cyan-500"
+                      >
+                        <option value="low">Low</option>
+                        <option value="medium">Medium</option>
+                        <option value="high">High</option>
+                        <option value="urgent">Urgent</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm text-gray-400 mb-2">Assignee</label>
+                      <select
+                        value={newTask.assignee}
+                        onChange={e => setNewTask({ ...newTask, assignee: e.target.value as Agent })}
+                        className="w-full p-3 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none focus:border-cyan-500"
+                      >
+                        <option value="">Unassigned</option>
+                        {AGENTS.map(agent => (
+                          <option key={agent} value={agent}>{agent}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm text-gray-400 mb-2">Status</label>
+                    <select
+                      value={newTask.status}
+                      onChange={e => setNewTask({ ...newTask, status: e.target.value as TaskStatus })}
+                      className="w-full p-3 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none focus:border-cyan-500"
+                    >
+                      {(Object.keys(STATUS_CONFIG) as TaskStatus[]).map(status => (
+                        <option key={status} value={status}>{STATUS_CONFIG[status].label}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="flex gap-3 mt-6">
+                  <button
+                    onClick={addTask}
+                    className="btn-gradient flex-1 py-3.5 rounded-xl font-medium text-white hover:opacity-90 transition-opacity duration-75"
+                  >
+                    Create Task
+                  </button>
+                  <button
+                    onClick={() => setShowAddModal(false)}
+                    className="px-6 py-3.5 rounded-xl bg-white/10 text-gray-300 font-medium hover:bg-white/20 transition-colors duration-75"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </GlassCard>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
