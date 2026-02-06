@@ -893,7 +893,7 @@ export default function ProjectManager() {
                   <button onClick={() => setConfirmDelete(null)} className="flex-1 py-3 rounded-xl bg-white/10 text-gray-300 font-medium hover:bg-white/20 transition-colors">Cancel</button>
                   <button onClick={() => {
                     if (confirmDelete.type === 'task') softDeleteTask(confirmDelete.id)
-                    else { persistProjects(projects.filter(p => p.id !== confirmDelete.id)); setConfirmDelete(null) }
+                    else { persistProjects(projects.filter(p => p.id !== confirmDelete.id)); setSelectedProject(null); setConfirmDelete(null) }
                   }} className="flex-1 py-3 rounded-xl bg-red-500/20 text-red-400 font-medium hover:bg-red-500/30 transition-colors">Delete</button>
                 </div>
               </GlassCard>
