@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 
 // ============================================
@@ -8,7 +8,8 @@ import { motion, AnimatePresence } from 'framer-motion'
 // ============================================
 type Priority = 'low' | 'medium' | 'high' | 'urgent'
 type TaskStatus = 'backlog' | 'todo' | 'in_progress' | 'review' | 'done'
-type ViewMode = 'dashboard' | 'kanban' | 'calendar' | 'list'
+type ProjectStatus = 'live' | 'building' | 'planned' | 'offline'
+type ViewMode = 'projects' | 'dashboard' | 'kanban' | 'list'
 
 const AGENTS = ['Jarvis', 'Bob', 'Justin', 'Kyle', 'Ethan', 'Shen'] as const
 type Agent = typeof AGENTS[number]
@@ -23,6 +24,20 @@ interface Task {
   dueDate: string | null
   tags: string[]
   createdAt: string
+  projectId?: string
+}
+
+interface Project {
+  id: string
+  name: string
+  description: string
+  url: string
+  status: ProjectStatus
+  category: string
+  techStack: string
+  owner: Agent
+  designScore: number
+  createdAt: string
 }
 
 // ============================================
@@ -34,6 +49,13 @@ const STATUS_CONFIG: Record<TaskStatus, { label: string; color: string; bg: stri
   in_progress: { label: 'In Progress', color: '#F59E0B', bg: 'rgba(245, 158, 11, 0.2)' },
   review: { label: 'Review', color: '#8B5CF6', bg: 'rgba(139, 92, 246, 0.2)' },
   done: { label: 'Done', color: '#10B981', bg: 'rgba(16, 185, 129, 0.2)' }
+}
+
+const PROJECT_STATUS_CONFIG: Record<ProjectStatus, { label: string; color: string; bg: string }> = {
+  live: { label: 'LIVE', color: '#10B981', bg: 'rgba(16, 185, 129, 0.2)' },
+  building: { label: 'BUILDING', color: '#F59E0B', bg: 'rgba(245, 158, 11, 0.2)' },
+  planned: { label: 'PLANNED', color: '#3B82F6', bg: 'rgba(59, 130, 246, 0.2)' },
+  offline: { label: 'OFFLINE', color: '#EF4444', bg: 'rgba(239, 68, 68, 0.2)' }
 }
 
 const PRIORITY_CONFIG: Record<Priority, { label: string; color: string; icon: string }> = {
@@ -48,19 +70,79 @@ const AGENT_COLORS: Record<Agent, string> = {
   Kyle: '#8B5CF6', Ethan: '#EF4444', Shen: '#EC4899'
 }
 
-const SAMPLE_TASKS: Task[] = [
-  { id: '1', title: 'Fix Telegram API costs', description: 'Reduce token usage by switching to Kimi K2.5', status: 'in_progress', priority: 'urgent', assignee: 'Jarvis', dueDate: '2026-02-06', tags: ['bug', 'urgent'], createdAt: '2026-02-05' },
-  { id: '2', title: 'Glass UI Dashboard upgrade', description: 'Apply glassmorphism to all dashboards with animations', status: 'todo', priority: 'high', assignee: 'Bob', dueDate: '2026-02-07', tags: ['design', 'feature'], createdAt: '2026-02-05' },
-  { id: '3', title: 'Deploy monitoring agent', description: 'Watch Vercel deployments and alert on failures', status: 'done', priority: 'medium', assignee: 'Justin', dueDate: '2026-02-05', tags: ['devops'], createdAt: '2026-02-04' },
-  { id: '4', title: 'Lead generation optimization', description: 'Improve Kyle dashboard metrics and conversion tracking', status: 'review', priority: 'medium', assignee: 'Kyle', dueDate: '2026-02-08', tags: ['marketing'], createdAt: '2026-02-03' },
+const CATEGORIES = ['Dashboard', 'Tool', 'Agent', 'Marketing', 'Finance', 'Security', 'DevOps', 'Other']
+
+// ============================================
+// DEFAULT DATA
+// ============================================
+const DEFAULT_PROJECTS: Project[] = [
+  { id: '1', name: 'Gem Dashboard Elite', description: 'Main project tracker & crypto signals leaderboard', url: 'https://gem-dashboard-elite.vercel.app', status: 'live', category: 'Dashboard', techStack: 'Next.js 14, Supabase, Tailwind 3', owner: 'Jarvis', designScore: 7, createdAt: '2026-01-15' },
+  { id: '2', name: 'Project Manager', description: 'Task & project management for the AI team', url: 'https://project-manager-opal-one.vercel.app', status: 'live', category: 'Tool', techStack: 'Next.js 16, Framer Motion, Tailwind 4', owner: 'Jarvis', designScore: 8, createdAt: '2026-02-01' },
+  { id: '3', name: 'Command Center', description: 'Cyberpunk system ops dashboard with live data', url: 'https://command-center-eosin.vercel.app', status: 'live', category: 'Dashboard', techStack: 'Next.js 14, SQLite, Supabase', owner: 'Justin', designScore: 7, createdAt: '2026-01-20' },
+  { id: '4', name: 'Agent Status Dashboard', description: 'Monitor all 16 agents, APIs, cron jobs', url: 'https://agent-status-dashboard.vercel.app', status: 'live', category: 'Dashboard', techStack: 'Static HTML, Chart.js', owner: 'Justin', designScore: 8, createdAt: '2026-01-18' },
+  { id: '5', name: 'Crypto Tracker', description: 'Live prices, calls, whale activity, liquidations', url: 'https://crypto-tracker-theta-seven.vercel.app', status: 'live', category: 'Dashboard', techStack: 'Next.js, Recharts, Tailwind 3', owner: 'Jarvis', designScore: 7, createdAt: '2026-01-10' },
+  { id: '6', name: 'Kyle Dashboard', description: 'Lead generation tracking with pipeline flow', url: 'https://kyle-dashboard.vercel.app', status: 'live', category: 'Marketing', techStack: 'Static HTML, Chart.js', owner: 'Kyle', designScore: 8, createdAt: '2026-01-22' },
+  { id: '7', name: 'Algo Leaderboard', description: 'Algo trading performance rankings', url: 'https://algo-leaderboard.vercel.app', status: 'live', category: 'Dashboard', techStack: 'Next.js 14, Recharts', owner: 'Jarvis', designScore: 3, createdAt: '2026-01-12' },
+  { id: '8', name: 'Strategy Hub', description: 'Internal content strategy docs', url: 'https://strategy-hub-eosin.vercel.app', status: 'live', category: 'Marketing', techStack: 'Next.js 14', owner: 'Jarvis', designScore: 3, createdAt: '2026-01-14' },
+  { id: '9', name: 'Master Dashboard', description: 'System overview with Vercel/n8n/cron monitoring', url: 'https://master-dashboard-fawn.vercel.app', status: 'live', category: 'Dashboard', techStack: 'Next.js 16, Pages Router', owner: 'Bob', designScore: 4, createdAt: '2026-01-08' },
+  { id: '10', name: 'ROI Calculator', description: 'Lead capture with ROI calculation', url: 'https://roi-calculator-flax-eta.vercel.app', status: 'live', category: 'Tool', techStack: 'Static HTML', owner: 'Kyle', designScore: 6, createdAt: '2026-01-25' },
+  { id: '11', name: 'Jarvis Dashboard v2', description: 'Empty - needs to be built or deleted', url: '', status: 'planned', category: 'Dashboard', techStack: 'Next.js 16, Tailwind 4', owner: 'Bob', designScore: 0, createdAt: '2026-02-01' },
+  { id: '12', name: 'Project Tracker', description: 'Kanban board for Call Setter AI', url: 'https://project-tracker-sand.vercel.app', status: 'live', category: 'Tool', techStack: 'Static HTML, Upstash Redis', owner: 'Jarvis', designScore: 5, createdAt: '2026-01-16' },
+]
+
+const DEFAULT_TASKS: Task[] = [
+  { id: '1', title: 'Fix Telegram API costs', description: 'Reduce token usage by switching to Kimi K2.5', status: 'in_progress', priority: 'urgent', assignee: 'Jarvis', dueDate: '2026-02-06', tags: ['bug', 'urgent'], createdAt: '2026-02-05', projectId: '2' },
+  { id: '2', title: 'Glass UI Dashboard upgrade', description: 'Apply glassmorphism to all dashboards', status: 'todo', priority: 'high', assignee: 'Bob', dueDate: '2026-02-07', tags: ['design'], createdAt: '2026-02-05' },
+  { id: '3', title: 'Deploy monitoring agent', description: 'Watch Vercel deployments and alert on failures', status: 'done', priority: 'medium', assignee: 'Justin', dueDate: '2026-02-05', tags: ['devops'], createdAt: '2026-02-04', projectId: '4' },
+  { id: '4', title: 'Lead generation optimization', description: 'Improve Kyle dashboard metrics', status: 'review', priority: 'medium', assignee: 'Kyle', dueDate: '2026-02-08', tags: ['marketing'], createdAt: '2026-02-03', projectId: '6' },
   { id: '5', title: 'Security audit completion', description: 'Full system security review and API key cleanup', status: 'backlog', priority: 'high', assignee: 'Ethan', dueDate: '2026-02-10', tags: ['security'], createdAt: '2026-02-02' },
   { id: '6', title: 'Cost tracking improvements', description: 'Better API cost monitoring with Shen dashboard', status: 'todo', priority: 'low', assignee: 'Shen', dueDate: '2026-02-09', tags: ['finance'], createdAt: '2026-02-01' },
 ]
 
 // ============================================
+// PERSISTENCE (Supabase API + localStorage cache)
+// ============================================
+const STORAGE_KEY_PROJECTS = 'pm_projects'
+const STORAGE_KEY_TASKS = 'pm_tasks'
+
+function loadLocal<T>(key: string, defaults: T): T {
+  if (typeof window === 'undefined') return defaults
+  try {
+    const raw = localStorage.getItem(key)
+    return raw ? JSON.parse(raw) : defaults
+  } catch { return defaults }
+}
+
+function saveLocal<T>(key: string, data: T) {
+  if (typeof window === 'undefined') return
+  localStorage.setItem(key, JSON.stringify(data))
+}
+
+async function saveToApi(tasks: Task[], projects: Project[]) {
+  try {
+    await fetch('/api/data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tasks, projects })
+    })
+  } catch (e) { console.error('API save error:', e) }
+}
+
+async function loadFromApi(): Promise<{ tasks: Task[]; projects: Project[] } | null> {
+  try {
+    const res = await fetch('/api/data')
+    if (!res.ok) return null
+    const data = await res.json()
+    if (data.source === 'supabase' && (data.tasks?.length > 0 || data.projects?.length > 0)) {
+      return { tasks: data.tasks, projects: data.projects }
+    }
+    return null
+  } catch { return null }
+}
+
+// ============================================
 // COMPONENTS
 // ============================================
-
 const GlassCard = ({ children, className = '' }: { children: React.ReactNode; className?: string }) => (
   <div className={`glass-card relative overflow-hidden rounded-2xl ${className}`}>
     <div className="relative z-10">{children}</div>
@@ -68,241 +150,16 @@ const GlassCard = ({ children, className = '' }: { children: React.ReactNode; cl
 )
 
 const StatCard = ({ icon, label, value, subtitle, color }: { icon: string; label: string; value: string | number; subtitle?: string; color: string }) => (
-  <GlassCard className="p-6">
+  <GlassCard className="p-5">
     <div className="flex items-start justify-between">
       <div>
-        <div className="flex items-center gap-2 mb-2">
-          <span className="text-2xl">{icon}</span>
-          <span className="text-sm text-gray-400 uppercase tracking-wider font-medium">{label}</span>
+        <div className="flex items-center gap-2 mb-1">
+          <span className="text-xl">{icon}</span>
+          <span className="text-xs text-gray-400 uppercase tracking-wider font-medium">{label}</span>
         </div>
-        <div className="text-4xl font-bold" style={{ color }}>{value}</div>
-        {subtitle && <div className="text-sm text-gray-500 mt-1">{subtitle}</div>}
+        <div className="text-3xl font-bold" style={{ color }}>{value}</div>
+        {subtitle && <div className="text-xs text-gray-500 mt-1">{subtitle}</div>}
       </div>
-      <div className="w-12 h-12 rounded-full flex items-center justify-center" style={{ background: `${color}20` }}>
-        <div className="w-3 h-3 rounded-full animate-pulse" style={{ background: color }} />
-      </div>
-    </div>
-  </GlassCard>
-)
-
-const TaskCard = ({ task, onClick, onDragStart }: { task: Task; onClick: () => void; onDragStart?: (e: React.DragEvent) => void }) => {
-  const isOverdue = task.dueDate && new Date(task.dueDate) < new Date()
-
-  return (
-    <div
-      draggable={!!onDragStart}
-      onDragStart={onDragStart}
-      onClick={onClick}
-      className="glass-task cursor-pointer rounded-xl p-4 mb-3 hover:bg-white/10 transition-colors duration-75"
-      style={{ border: `1px solid ${PRIORITY_CONFIG[task.priority].color}30` }}
-    >
-      <div className="flex items-start justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <span style={{ color: PRIORITY_CONFIG[task.priority].color }} className="text-lg">{PRIORITY_CONFIG[task.priority].icon}</span>
-          <span className="font-semibold text-white">{task.title}</span>
-        </div>
-        {task.assignee && (
-          <div
-            className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-black shadow-lg"
-            style={{ background: AGENT_COLORS[task.assignee], boxShadow: `0 0 20px ${AGENT_COLORS[task.assignee]}50` }}
-          >
-            {task.assignee[0]}
-          </div>
-        )}
-      </div>
-
-      <p className="text-sm text-gray-400 mb-3 line-clamp-2">{task.description}</p>
-
-      <div className="flex items-center justify-between">
-        <div className="flex gap-2">
-          {task.tags.slice(0, 2).map(tag => (
-            <span key={tag} className="text-xs px-2 py-1 rounded-full bg-white/10 text-gray-300">{tag}</span>
-          ))}
-        </div>
-        {task.dueDate && (
-          <span className={`text-xs px-2 py-1 rounded-full ${isOverdue ? 'bg-red-500/20 text-red-400' : 'bg-white/10 text-gray-400'}`}>
-            {isOverdue ? '⚠️ Overdue' : task.dueDate}
-          </span>
-        )}
-      </div>
-    </div>
-  )
-}
-
-const KanbanColumn = ({ status, tasks, onTaskClick, onDrop, onDragOver, onDragStart }: {
-  status: TaskStatus;
-  tasks: Task[];
-  onTaskClick: (task: Task) => void;
-  onDrop?: (e: React.DragEvent) => void;
-  onDragOver?: (e: React.DragEvent) => void;
-  onDragStart?: (e: React.DragEvent, taskId: string) => void;
-}) => (
-  <div className="flex-1 min-w-[280px] max-w-[320px]">
-    <div className="flex items-center gap-3 mb-4 px-2">
-      <div className="w-3 h-3 rounded-full" style={{ background: STATUS_CONFIG[status].color, boxShadow: `0 0 10px ${STATUS_CONFIG[status].color}` }} />
-      <h3 className="font-semibold text-white">{STATUS_CONFIG[status].label}</h3>
-      <span className="text-sm px-2 py-0.5 rounded-full bg-white/10 text-gray-400 ml-auto">{tasks.length}</span>
-    </div>
-    <div
-      onDrop={onDrop}
-      onDragOver={onDragOver}
-      className="rounded-2xl p-3 min-h-[500px] transition-colors duration-75"
-      style={{ background: STATUS_CONFIG[status].bg, border: `1px solid ${STATUS_CONFIG[status].color}20` }}
-    >
-      {tasks.map(task => (
-        <TaskCard
-          key={task.id}
-          task={task}
-          onClick={() => onTaskClick(task)}
-          onDragStart={onDragStart ? (e) => onDragStart(e, task.id) : undefined}
-        />
-      ))}
-      {tasks.length === 0 && (
-        <div className="text-center text-gray-500 py-12 border-2 border-dashed border-white/10 rounded-xl">
-          Drop tasks here
-        </div>
-      )}
-    </div>
-  </div>
-)
-
-const CalendarView = ({ tasks }: { tasks: Task[] }) => {
-  const [currentDate, setCurrentDate] = useState(new Date())
-
-  const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate()
-  const firstDayOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1).getDay()
-
-  const days = Array.from({ length: 42 }, (_, i) => {
-    const day = i - firstDayOfMonth + 1
-    if (day < 1 || day > daysInMonth) return null
-    return day
-  })
-
-  const getTasksForDay = (day: number) => {
-    const dateStr = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
-    return tasks.filter(t => t.dueDate === dateStr)
-  }
-
-  return (
-    <GlassCard className="p-6" >
-      <div className="flex items-center justify-between mb-6">
-        <button
-          onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1))}
-          className="p-3 rounded-xl bg-white/10 hover:bg-white/20 transition-colors duration-75 text-white"
-        >
-          ← Prev
-        </button>
-        <h3 className="text-2xl font-bold text-white">
-          {currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-        </h3>
-        <button
-          onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1))}
-          className="p-3 rounded-xl bg-white/10 hover:bg-white/20 transition-colors duration-75 text-white"
-        >
-          Next →
-        </button>
-      </div>
-
-      <div className="grid grid-cols-7 gap-2 mb-4">
-        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
-          <div key={day} className="text-center text-sm text-gray-400 py-3 font-medium">{day}</div>
-        ))}
-      </div>
-
-      <div className="grid grid-cols-7 gap-2">
-        {days.map((day, i) => {
-          if (!day) return <div key={i} className="aspect-square" />
-          const dayTasks = getTasksForDay(day)
-          const isToday = new Date().getDate() === day && new Date().getMonth() === currentDate.getMonth()
-
-          return (
-            <div
-              key={i}
-              className={`aspect-square rounded-xl p-2 cursor-pointer transition-colors duration-75 border hover:bg-white/5 ${
-                isToday
-                  ? 'bg-gradient-to-br from-blue-500/30 to-cyan-500/30 border-blue-500 shadow-lg shadow-blue-500/20'
-                  : 'border-transparent hover:border-white/20'
-              }`}
-            >
-              <div className={`text-sm mb-1 font-medium ${isToday ? 'text-cyan-400' : 'text-gray-300'}`}>{day}</div>
-              <div className="space-y-1">
-                {dayTasks.slice(0, 2).map(task => (
-                  <div
-                    key={task.id}
-                    className="text-xs truncate rounded px-1 py-0.5"
-                    style={{ background: PRIORITY_CONFIG[task.priority].color + '40', color: PRIORITY_CONFIG[task.priority].color }}
-                  >
-                    {task.title}
-                  </div>
-                ))}
-                {dayTasks.length > 2 && (
-                  <div className="text-xs text-gray-500">+{dayTasks.length - 2}</div>
-                )}
-              </div>
-            </div>
-          )
-        })}
-      </div>
-    </GlassCard>
-  )
-}
-
-const ListView = ({ tasks, onTaskClick }: { tasks: Task[]; onTaskClick: (task: Task) => void }) => (
-  <GlassCard className="overflow-hidden" >
-    <div className="overflow-x-auto">
-      <table className="w-full">
-        <thead>
-          <tr className="border-b border-white/10">
-            <th className="text-left p-4 text-sm text-gray-400 font-medium">Task</th>
-            <th className="text-left p-4 text-sm text-gray-400 font-medium">Status</th>
-            <th className="text-left p-4 text-sm text-gray-400 font-medium">Priority</th>
-            <th className="text-left p-4 text-sm text-gray-400 font-medium">Assignee</th>
-            <th className="text-left p-4 text-sm text-gray-400 font-medium">Due Date</th>
-          </tr>
-        </thead>
-        <tbody>
-          {tasks.map((task) => (
-            <tr
-              key={task.id}
-              onClick={() => onTaskClick(task)}
-              className="border-b border-white/5 cursor-pointer hover:bg-white/5 transition-colors duration-75"
-            >
-              <td className="p-4">
-                <div className="font-medium text-white">{task.title}</div>
-                <div className="text-sm text-gray-500 line-clamp-1">{task.description}</div>
-              </td>
-              <td className="p-4">
-                <span
-                  className="px-3 py-1.5 rounded-full text-xs font-medium"
-                  style={{ background: STATUS_CONFIG[task.status].bg, color: STATUS_CONFIG[task.status].color }}
-                >
-                  {STATUS_CONFIG[task.status].label}
-                </span>
-              </td>
-              <td className="p-4">
-                <span className="flex items-center gap-2" style={{ color: PRIORITY_CONFIG[task.priority].color }}>
-                  <span className="text-lg">{PRIORITY_CONFIG[task.priority].icon}</span>
-                  {PRIORITY_CONFIG[task.priority].label}
-                </span>
-              </td>
-              <td className="p-4">
-                {task.assignee && (
-                  <div className="flex items-center gap-2">
-                    <div
-                      className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-black"
-                      style={{ background: AGENT_COLORS[task.assignee] }}
-                    >
-                      {task.assignee[0]}
-                    </div>
-                    <span className="text-gray-300">{task.assignee}</span>
-                  </div>
-                )}
-              </td>
-              <td className="p-4 text-gray-400">{task.dueDate || '-'}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </div>
   </GlassCard>
 )
@@ -311,49 +168,124 @@ const ListView = ({ tasks, onTaskClick }: { tasks: Task[]; onTaskClick: (task: T
 // MAIN APP
 // ============================================
 export default function ProjectManager() {
-  const [tasks, setTasks] = useState<Task[]>(SAMPLE_TASKS)
-  const [viewMode, setViewMode] = useState<ViewMode>('dashboard')
+  const [projects, setProjects] = useState<Project[]>(DEFAULT_PROJECTS)
+  const [tasks, setTasks] = useState<Task[]>(DEFAULT_TASKS)
+  const [viewMode, setViewMode] = useState<ViewMode>('projects')
+  const [selectedProject, setSelectedProject] = useState<Project | null>(null)
+  const [editingProject, setEditingProject] = useState<Project | null>(null)
+  const [showAddProject, setShowAddProject] = useState(false)
+  const [showAddTask, setShowAddTask] = useState(false)
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
-  const [showAddModal, setShowAddModal] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [filterStatus, setFilterStatus] = useState<ProjectStatus | 'all'>('all')
+  const [newProject, setNewProject] = useState<Omit<Project, 'id' | 'createdAt'>>({
+    name: '', description: '', url: '', status: 'planned', category: 'Dashboard', techStack: '', owner: 'Jarvis', designScore: 5
+  })
   const [newTask, setNewTask] = useState({ title: '', description: '', priority: 'medium' as Priority, assignee: '' as Agent | '', status: 'todo' as TaskStatus })
 
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'saved' | 'error'>('idle')
+  const saveTimer = useRef<NodeJS.Timeout | null>(null)
+  const isInitialLoad = useRef(true)
+
+  // Load from API on mount, fall back to localStorage
+  useEffect(() => {
+    const load = async () => {
+      // Instant load from localStorage cache
+      const localP = loadLocal(STORAGE_KEY_PROJECTS, DEFAULT_PROJECTS)
+      const localT = loadLocal(STORAGE_KEY_TASKS, DEFAULT_TASKS)
+      setProjects(localP)
+      setTasks(localT)
+
+      // Then try API
+      setSyncStatus('syncing')
+      const apiData = await loadFromApi()
+      if (apiData) {
+        setProjects(apiData.projects.length > 0 ? apiData.projects : localP)
+        setTasks(apiData.tasks.length > 0 ? apiData.tasks : localT)
+        saveLocal(STORAGE_KEY_PROJECTS, apiData.projects.length > 0 ? apiData.projects : localP)
+        saveLocal(STORAGE_KEY_TASKS, apiData.tasks.length > 0 ? apiData.tasks : localT)
+        setSyncStatus('saved')
+      } else {
+        // No API data - seed API with defaults/local
+        await saveToApi(localT, localP)
+        setSyncStatus('saved')
+      }
+      isInitialLoad.current = false
+    }
+    load()
+  }, [])
+
+  // Debounced save to API + localStorage
+  const debouncedSave = useCallback((t: Task[], p: Project[]) => {
+    saveLocal(STORAGE_KEY_TASKS, t)
+    saveLocal(STORAGE_KEY_PROJECTS, p)
+    if (saveTimer.current) clearTimeout(saveTimer.current)
+    saveTimer.current = setTimeout(async () => {
+      setSyncStatus('syncing')
+      await saveToApi(t, p)
+      setSyncStatus('saved')
+    }, 800)
+  }, [])
+
+  // Persist on change
+  const persistProjects = useCallback((p: Project[]) => { setProjects(p); debouncedSave(tasks, p) }, [tasks, debouncedSave])
+  const persistTasks = useCallback((t: Task[]) => { setTasks(t); debouncedSave(t, projects) }, [projects, debouncedSave])
+
+  // CRUD: Projects
+  const addProject = () => {
+    if (!newProject.name.trim()) return
+    const project: Project = { ...newProject, id: Date.now().toString(), createdAt: new Date().toISOString().split('T')[0] }
+    persistProjects([project, ...projects])
+    setNewProject({ name: '', description: '', url: '', status: 'planned', category: 'Dashboard', techStack: '', owner: 'Jarvis', designScore: 5 })
+    setShowAddProject(false)
+  }
+
+  const updateProject = () => {
+    if (!editingProject) return
+    persistProjects(projects.map(p => p.id === editingProject.id ? editingProject : p))
+    setEditingProject(null)
+  }
+
+  const deleteProject = (id: string) => {
+    persistProjects(projects.filter(p => p.id !== id))
+    setSelectedProject(null)
+  }
+
+  // CRUD: Tasks
   const addTask = () => {
     if (!newTask.title.trim()) return
     const task: Task = {
-      id: Date.now().toString(),
-      title: newTask.title,
-      description: newTask.description,
-      status: newTask.status,
-      priority: newTask.priority,
-      assignee: newTask.assignee || null,
-      dueDate: null,
-      tags: [],
-      createdAt: new Date().toISOString().split('T')[0]
+      id: Date.now().toString(), title: newTask.title, description: newTask.description,
+      status: newTask.status, priority: newTask.priority, assignee: newTask.assignee || null,
+      dueDate: null, tags: [], createdAt: new Date().toISOString().split('T')[0]
     }
-    setTasks([task, ...tasks])
+    persistTasks([task, ...tasks])
     setNewTask({ title: '', description: '', priority: 'medium', assignee: '', status: 'todo' })
-    setShowAddModal(false)
+    setShowAddTask(false)
+  }
+
+  const deleteTask = (id: string) => {
+    persistTasks(tasks.filter(t => t.id !== id))
+    setSelectedTask(null)
   }
 
   const updateTaskStatus = (taskId: string, newStatus: TaskStatus) => {
-    setTasks(tasks.map(t => t.id === taskId ? { ...t, status: newStatus } : t))
+    persistTasks(tasks.map(t => t.id === taskId ? { ...t, status: newStatus } : t))
   }
 
-  const handleDragStart = (e: React.DragEvent, taskId: string) => {
-    e.dataTransfer.setData('taskId', taskId)
-  }
+  const handleDragStart = (e: React.DragEvent, taskId: string) => { e.dataTransfer.setData('taskId', taskId) }
+  const handleDrop = (e: React.DragEvent, status: TaskStatus) => { e.preventDefault(); const id = e.dataTransfer.getData('taskId'); if (id) updateTaskStatus(id, status) }
+  const handleDragOver = (e: React.DragEvent) => { e.preventDefault() }
 
-  const handleDrop = (e: React.DragEvent, status: TaskStatus) => {
-    e.preventDefault()
-    const taskId = e.dataTransfer.getData('taskId')
-    if (taskId) updateTaskStatus(taskId, status)
-  }
+  // Stats
+  const projectStats = useMemo(() => ({
+    total: projects.length,
+    live: projects.filter(p => p.status === 'live').length,
+    building: projects.filter(p => p.status === 'building').length,
+    needsWork: projects.filter(p => p.designScore <= 4).length
+  }), [projects])
 
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault()
-  }
-
-  const stats = useMemo(() => ({
+  const taskStats = useMemo(() => ({
     total: tasks.length,
     completed: tasks.filter(t => t.status === 'done').length,
     inProgress: tasks.filter(t => t.status === 'in_progress').length,
@@ -366,369 +298,473 @@ export default function ProjectManager() {
     return grouped
   }, [tasks])
 
+  const filteredProjects = useMemo(() => {
+    return projects.filter(p => {
+      const matchesSearch = !searchQuery || p.name.toLowerCase().includes(searchQuery.toLowerCase()) || p.description.toLowerCase().includes(searchQuery.toLowerCase())
+      const matchesStatus = filterStatus === 'all' || p.status === filterStatus
+      return matchesSearch && matchesStatus
+    })
+  }, [projects, searchQuery, filterStatus])
+
+  const inputClass = "w-full p-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500"
+  const selectClass = "w-full p-3 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none focus:border-cyan-500"
+
   return (
-    <div className="min-h-screen p-8" style={{ background: 'linear-gradient(135deg, #0a0a1a 0%, #1a1a3e 50%, #0a0a1a 100%)' }}>
-      {/* Static background orbs - no animation for performance */}
+    <div className="min-h-screen" style={{ background: 'linear-gradient(135deg, #0a0a1a 0%, #1a1a3e 50%, #0a0a1a 100%)' }}>
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
         <div className="orb orb-blue top-1/4 left-1/4 w-96 h-96" />
         <div className="orb orb-purple bottom-1/4 right-1/4 w-96 h-96" />
         <div className="orb orb-cyan top-1/2 right-1/3 w-64 h-64" />
       </div>
 
-      <div className="relative z-10 max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between mb-8 gap-4">
-          <div>
-            <h1 className="text-4xl lg:text-5xl font-bold gradient-title">
-              Project Management
-            </h1>
-            <p className="text-gray-400 mt-2 text-lg">Manage tasks, track progress, collaborate with your AI team</p>
+      {/* Sticky Nav */}
+      <header className="sticky top-0 z-50 glass-card" style={{ borderRadius: 0, borderTop: 'none', borderLeft: 'none', borderRight: 'none' }}>
+        <div className="max-w-7xl mx-auto px-4 md:px-6 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <h1 className="text-xl md:text-2xl font-bold gradient-title whitespace-nowrap">Project Manager</h1>
+            <div className="hidden sm:flex items-center gap-2 px-3 py-1 rounded-full bg-green-500/10 border border-green-500/30">
+              <span className="w-2 h-2 rounded-full bg-green-400" style={{ animation: 'glow-pulse 2s ease-in-out infinite' }} />
+              <span className="text-xs text-green-400 font-medium">LIVE</span>
+            </div>
+            <div className="hidden sm:flex items-center gap-2 px-3 py-1 rounded-full" style={{ background: syncStatus === 'syncing' ? 'rgba(245,158,11,0.1)' : syncStatus === 'saved' ? 'rgba(16,185,129,0.1)' : syncStatus === 'error' ? 'rgba(239,68,68,0.1)' : 'rgba(107,114,128,0.1)', border: `1px solid ${syncStatus === 'syncing' ? 'rgba(245,158,11,0.3)' : syncStatus === 'saved' ? 'rgba(16,185,129,0.3)' : syncStatus === 'error' ? 'rgba(239,68,68,0.3)' : 'rgba(107,114,128,0.3)'}` }}>
+              <span className="w-2 h-2 rounded-full" style={{ background: syncStatus === 'syncing' ? '#F59E0B' : syncStatus === 'saved' ? '#10B981' : syncStatus === 'error' ? '#EF4444' : '#6B7280', animation: syncStatus === 'syncing' ? 'glow-pulse 1s ease-in-out infinite' : 'none' }} />
+              <span className="text-xs font-medium" style={{ color: syncStatus === 'syncing' ? '#F59E0B' : syncStatus === 'saved' ? '#10B981' : syncStatus === 'error' ? '#EF4444' : '#6B7280' }}>
+                {syncStatus === 'syncing' ? 'Syncing...' : syncStatus === 'saved' ? 'Saved' : syncStatus === 'error' ? 'Error' : 'Offline'}
+              </span>
+            </div>
           </div>
 
-          <div className="flex items-center gap-4 flex-wrap">
-            {/* View Mode Tabs */}
-            <GlassCard className="p-1.5 flex gap-1" >
-              {[
-                { key: 'dashboard', icon: '📊', label: 'Dashboard' },
-                { key: 'kanban', icon: '📋', label: 'Kanban' },
-                { key: 'calendar', icon: '📅', label: 'Calendar' },
-                { key: 'list', icon: '📝', label: 'List' }
-              ].map(({ key, icon, label }) => (
-                <button
-                  key={key}
-                  onClick={() => setViewMode(key as ViewMode)}
-                  className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-colors duration-75 flex items-center gap-2 ${
-                    viewMode === key
-                      ? 'tab-active text-white'
-                      : 'text-gray-400 hover:text-white hover:bg-white/10'
-                  }`}
-                >
-                  <span>{icon}</span>
-                  <span className="hidden sm:inline">{label}</span>
-                </button>
-              ))}
-            </GlassCard>
+          <nav className="hidden md:flex items-center gap-1 p-1 rounded-xl bg-white/5 border border-white/10">
+            {([
+              { key: 'projects', icon: '🏗️', label: 'Projects' },
+              { key: 'dashboard', icon: '📊', label: 'Dashboard' },
+              { key: 'kanban', icon: '📋', label: 'Kanban' },
+              { key: 'list', icon: '📝', label: 'List' }
+            ] as const).map(({ key, icon, label }) => (
+              <button key={key} onClick={() => setViewMode(key as ViewMode)}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-75 flex items-center gap-2 ${viewMode === key ? 'tab-active text-white' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}>
+                <span>{icon}</span><span>{label}</span>
+              </button>
+            ))}
+          </nav>
 
-            {/* Add Task Button */}
-            <button
-              onClick={() => setShowAddModal(true)}
-              className="btn-gradient px-6 py-3 rounded-xl font-medium text-white hover:opacity-90 transition-opacity duration-75"
-            >
-              + Add Task
+          <div className="flex items-center gap-2">
+            <button onClick={() => setShowAddProject(true)} className="btn-gradient px-4 py-2 rounded-xl font-medium text-white text-sm flex items-center gap-2">
+              <span>+</span><span className="hidden sm:inline">Project</span>
+            </button>
+            <button onClick={() => setShowAddTask(true)} className="px-4 py-2 rounded-xl font-medium text-white text-sm bg-white/10 border border-white/20 hover:bg-white/20 transition-colors duration-75">
+              <span>+ Task</span>
             </button>
           </div>
         </div>
+        <div className="md:hidden flex items-center gap-1 px-4 pb-3 overflow-x-auto">
+          {([
+            { key: 'projects', icon: '🏗️', label: 'Projects' },
+            { key: 'dashboard', icon: '📊', label: 'Dashboard' },
+            { key: 'kanban', icon: '📋', label: 'Kanban' },
+            { key: 'list', icon: '📝', label: 'List' }
+          ] as const).map(({ key, icon, label }) => (
+            <button key={key} onClick={() => setViewMode(key as ViewMode)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-75 flex items-center gap-1.5 whitespace-nowrap ${viewMode === key ? 'tab-active text-white' : 'text-gray-400 hover:text-white'}`}>
+              <span>{icon}</span><span>{label}</span>
+            </button>
+          ))}
+        </div>
+      </header>
 
-        {/* Dashboard View */}
-        {viewMode === 'dashboard' && (
-          <div className="space-y-8">
-            {/* Stats Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-              <StatCard icon="📋" label="Total" value={stats.total} subtitle="All tasks" color="#3B82F6" />
-              <StatCard icon="⚡" label="In Progress" value={stats.inProgress} subtitle="Being worked on" color="#F59E0B" />
-              <StatCard icon="✅" label="Completed" value={stats.completed} subtitle={`${Math.round((stats.completed / stats.total) * 100) || 0}% done`} color="#10B981" />
-              <StatCard icon="⚠️" label="Overdue" value={stats.overdue} subtitle="Need attention" color="#EF4444" />
+      <div className="relative z-10 max-w-7xl mx-auto p-4 md:p-8">
+
+        {/* ===== PROJECTS VIEW ===== */}
+        {viewMode === 'projects' && (
+          <div className="space-y-6">
+            {/* Stats */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <StatCard icon="🏗️" label="Total" value={projectStats.total} subtitle="All projects" color="#3B82F6" />
+              <StatCard icon="🟢" label="Live" value={projectStats.live} subtitle="Deployed" color="#10B981" />
+              <StatCard icon="🔨" label="Building" value={projectStats.building} subtitle="In progress" color="#F59E0B" />
+              <StatCard icon="⚠️" label="Needs Work" value={projectStats.needsWork} subtitle="Score ≤ 4" color="#EF4444" />
             </div>
 
-            {/* Team & Stats */}
+            {/* Search & Filter */}
+            <div className="flex flex-col sm:flex-row gap-3">
+              <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search projects..."
+                className="flex-1 p-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500" />
+              <div className="flex gap-2">
+                {(['all', 'live', 'building', 'planned', 'offline'] as const).map(s => (
+                  <button key={s} onClick={() => setFilterStatus(s)}
+                    className={`px-4 py-2 rounded-xl text-sm font-medium transition-all duration-75 capitalize ${filterStatus === s ? 'bg-white/20 text-white border border-white/30' : 'text-gray-400 hover:text-white bg-white/5'}`}>
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Project Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filteredProjects.map(project => (
+                <GlassCard key={project.id} className="p-5 cursor-pointer hover:bg-white/5 transition-all duration-75">
+                  <div onClick={() => setSelectedProject(project)}>
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-semibold text-white truncate">{project.name}</h3>
+                        <p className="text-sm text-gray-400 mt-1 line-clamp-2">{project.description}</p>
+                      </div>
+                      <span className="ml-3 px-2.5 py-1 rounded-full text-xs font-bold shrink-0"
+                        style={{ background: PROJECT_STATUS_CONFIG[project.status].bg, color: PROJECT_STATUS_CONFIG[project.status].color }}>
+                        {PROJECT_STATUS_CONFIG[project.status].label}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className="text-xs px-2 py-1 rounded-full bg-white/10 text-gray-300">{project.category}</span>
+                      <span className="text-xs text-gray-500">{project.techStack}</span>
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-black"
+                          style={{ background: AGENT_COLORS[project.owner] }}>
+                          {project.owner[0]}
+                        </div>
+                        <span className="text-xs text-gray-400">{project.owner}</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className="text-xs text-gray-500">Design:</span>
+                        <div className="flex gap-0.5">
+                          {Array.from({ length: 10 }, (_, i) => (
+                            <div key={i} className="w-2 h-2 rounded-full" style={{ background: i < project.designScore ? '#10B981' : 'rgba(255,255,255,0.1)' }} />
+                          ))}
+                        </div>
+                        <span className="text-xs text-gray-400 ml-1">{project.designScore}/10</span>
+                      </div>
+                    </div>
+
+                    {project.url && (
+                      <a href={project.url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
+                        className="block mt-3 text-xs text-cyan-400 hover:text-cyan-300 truncate transition-colors">
+                        {project.url.replace('https://', '')} →
+                      </a>
+                    )}
+                  </div>
+                </GlassCard>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ===== DASHBOARD VIEW ===== */}
+        {viewMode === 'dashboard' && (
+          <div className="space-y-6">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <StatCard icon="📋" label="Tasks" value={taskStats.total} subtitle="All tasks" color="#3B82F6" />
+              <StatCard icon="⚡" label="Active" value={taskStats.inProgress} subtitle="In progress" color="#F59E0B" />
+              <StatCard icon="✅" label="Done" value={taskStats.completed} subtitle={`${Math.round((taskStats.completed / taskStats.total) * 100) || 0}%`} color="#10B981" />
+              <StatCard icon="⚠️" label="Overdue" value={taskStats.overdue} subtitle="Need attention" color="#EF4444" />
+            </div>
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Status Breakdown */}
               <GlassCard className="p-6">
-                <h3 className="text-lg font-semibold text-white mb-5">Status Breakdown</h3>
-                <div className="space-y-4">
+                <h3 className="text-lg font-semibold text-white mb-4">Status Breakdown</h3>
+                <div className="space-y-3">
                   {(Object.entries(tasksByStatus) as [TaskStatus, Task[]][]).map(([status, statusTasks]) => (
                     <div key={status} className="flex items-center gap-3">
                       <div className="w-3 h-3 rounded-full" style={{ background: STATUS_CONFIG[status].color }} />
-                      <span className="text-gray-300 flex-1">{STATUS_CONFIG[status].label}</span>
-                      <span className="text-white font-bold">{statusTasks.length}</span>
-                      <div className="w-24 h-2 rounded-full bg-white/10 overflow-hidden">
-                        <motion.div
-                          initial={{ width: 0 }}
-                          animate={{ width: `${(statusTasks.length / tasks.length) * 100 || 0}%` }}
-                          transition={{ duration: 0.8, ease: "easeOut" }}
-                          className="h-full rounded-full"
-                          style={{ background: STATUS_CONFIG[status].color }}
-                        />
+                      <span className="text-gray-300 flex-1 text-sm">{STATUS_CONFIG[status].label}</span>
+                      <span className="text-white font-bold text-sm">{statusTasks.length}</span>
+                      <div className="w-20 h-2 rounded-full bg-white/10 overflow-hidden">
+                        <div className="h-full rounded-full transition-all duration-500" style={{ background: STATUS_CONFIG[status].color, width: `${(statusTasks.length / tasks.length) * 100 || 0}%` }} />
                       </div>
                     </div>
                   ))}
                 </div>
               </GlassCard>
-
-              {/* Priority Distribution */}
               <GlassCard className="p-6">
-                <h3 className="text-lg font-semibold text-white mb-5">Priority Distribution</h3>
-                <div className="space-y-4">
-                  {(['urgent', 'high', 'medium', 'low'] as Priority[]).map(priority => {
-                    const count = tasks.filter(t => t.priority === priority).length
-                    return (
-                      <div key={priority} className="flex items-center gap-3">
-                        <span className="text-xl" style={{ color: PRIORITY_CONFIG[priority].color }}>{PRIORITY_CONFIG[priority].icon}</span>
-                        <span className="text-gray-300 flex-1">{PRIORITY_CONFIG[priority].label}</span>
-                        <span className="text-white font-bold">{count}</span>
-                      </div>
-                    )
-                  })}
+                <h3 className="text-lg font-semibold text-white mb-4">Priority</h3>
+                <div className="space-y-3">
+                  {(['urgent', 'high', 'medium', 'low'] as Priority[]).map(p => (
+                    <div key={p} className="flex items-center gap-3">
+                      <span className="text-lg" style={{ color: PRIORITY_CONFIG[p].color }}>{PRIORITY_CONFIG[p].icon}</span>
+                      <span className="text-gray-300 flex-1 text-sm">{PRIORITY_CONFIG[p].label}</span>
+                      <span className="text-white font-bold text-sm">{tasks.filter(t => t.priority === p).length}</span>
+                    </div>
+                  ))}
                 </div>
               </GlassCard>
-
-              {/* Team Workload */}
               <GlassCard className="p-6">
-                <h3 className="text-lg font-semibold text-white mb-5">Team Workload</h3>
-                <div className="space-y-4">
-                  {AGENTS.map(agent => {
-                    const count = tasks.filter(t => t.assignee === agent).length
-                    return (
-                      <div key={agent} className="flex items-center gap-3">
-                        <div
-                          className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold text-black shadow-lg"
-                          style={{ background: AGENT_COLORS[agent], boxShadow: `0 0 15px ${AGENT_COLORS[agent]}40` }}
-                        >
-                          {agent[0]}
-                        </div>
-                        <span className="text-gray-300 flex-1">{agent}</span>
-                        <span className="text-white font-bold">{count} tasks</span>
-                      </div>
-                    )
-                  })}
+                <h3 className="text-lg font-semibold text-white mb-4">Team</h3>
+                <div className="space-y-3">
+                  {AGENTS.map(agent => (
+                    <div key={agent} className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-black" style={{ background: AGENT_COLORS[agent] }}>{agent[0]}</div>
+                      <span className="text-gray-300 flex-1 text-sm">{agent}</span>
+                      <span className="text-white font-bold text-sm">{tasks.filter(t => t.assignee === agent).length}</span>
+                    </div>
+                  ))}
                 </div>
               </GlassCard>
             </div>
-
-            {/* Recent Tasks */}
-            <GlassCard className="p-6" >
-              <h3 className="text-lg font-semibold text-white mb-5">Recent Tasks</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {tasks.slice(0, 6).map((task) => (
-                  <TaskCard key={task.id} task={task} onClick={() => setSelectedTask(task)} />
-                ))}
-              </div>
-            </GlassCard>
           </div>
         )}
 
-        {/* Kanban View */}
+        {/* ===== KANBAN VIEW ===== */}
         {viewMode === 'kanban' && (
-          <div className="flex gap-6 overflow-x-auto pb-4">
-            {(Object.keys(STATUS_CONFIG) as TaskStatus[]).map((status) => (
-              <KanbanColumn
-                key={status}
-                status={status}
-                tasks={tasksByStatus[status]}
-                onTaskClick={setSelectedTask}
-                onDrop={(e) => handleDrop(e, status)}
-                onDragOver={handleDragOver}
-                onDragStart={handleDragStart}
-              />
+          <div className="flex gap-4 overflow-x-auto pb-4">
+            {(Object.keys(STATUS_CONFIG) as TaskStatus[]).map(status => (
+              <div key={status} className="flex-1 min-w-[260px] max-w-[300px]">
+                <div className="flex items-center gap-2 mb-3 px-2">
+                  <div className="w-3 h-3 rounded-full" style={{ background: STATUS_CONFIG[status].color }} />
+                  <h3 className="font-semibold text-white text-sm">{STATUS_CONFIG[status].label}</h3>
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-white/10 text-gray-400 ml-auto">{tasksByStatus[status].length}</span>
+                </div>
+                <div onDrop={e => handleDrop(e, status)} onDragOver={handleDragOver}
+                  className="rounded-xl p-2 min-h-[400px]" style={{ background: STATUS_CONFIG[status].bg, border: `1px solid ${STATUS_CONFIG[status].color}20` }}>
+                  {tasksByStatus[status].map(task => (
+                    <div key={task.id} draggable onDragStart={e => handleDragStart(e, task.id)} onClick={() => setSelectedTask(task)}
+                      className="glass-task cursor-pointer rounded-lg p-3 mb-2 hover:bg-white/10 transition-all duration-75"
+                      style={{ border: `1px solid ${PRIORITY_CONFIG[task.priority].color}30` }}>
+                      <div className="flex items-center gap-2 mb-2">
+                        <span style={{ color: PRIORITY_CONFIG[task.priority].color }}>{PRIORITY_CONFIG[task.priority].icon}</span>
+                        <span className="font-medium text-white text-sm truncate">{task.title}</span>
+                      </div>
+                      <p className="text-xs text-gray-400 line-clamp-2 mb-2">{task.description}</p>
+                      <div className="flex items-center justify-between">
+                        {task.assignee && <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-black" style={{ background: AGENT_COLORS[task.assignee] }}>{task.assignee[0]}</div>}
+                        {task.dueDate && <span className={`text-xs ${task.dueDate && new Date(task.dueDate) < new Date() && task.status !== 'done' ? 'text-red-400' : 'text-gray-500'}`}>{task.dueDate}</span>}
+                      </div>
+                    </div>
+                  ))}
+                  {tasksByStatus[status].length === 0 && <div className="text-center text-gray-500 py-8 border-2 border-dashed border-white/10 rounded-lg text-sm">Drop here</div>}
+                </div>
+              </div>
             ))}
           </div>
         )}
 
-        {/* Calendar View */}
-        {viewMode === 'calendar' && (
-          <CalendarView tasks={tasks} />
-        )}
-
-        {/* List View */}
+        {/* ===== LIST VIEW ===== */}
         {viewMode === 'list' && (
-          <ListView tasks={tasks} onTaskClick={setSelectedTask} />
-        )}
-
-        {/* Task Detail Modal */}
-        <AnimatePresence>
-          {selectedTask && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-50 p-4 lg:p-8"
-              onClick={() => setSelectedTask(null)}
-            >
-              <motion.div
-                initial={{ scale: 0.9, opacity: 0, y: 20 }}
-                animate={{ scale: 1, opacity: 1, y: 0 }}
-                exit={{ scale: 0.9, opacity: 0, y: 20 }}
-                onClick={e => e.stopPropagation()}
-                className="w-full max-w-lg"
-              >
-                <GlassCard className="p-8" >
-                  <div className="flex items-start justify-between mb-6">
-                    <div>
-                      <div className="flex items-center gap-2 mb-3">
-                        <span className="text-xl" style={{ color: PRIORITY_CONFIG[selectedTask.priority].color }}>
-                          {PRIORITY_CONFIG[selectedTask.priority].icon}
-                        </span>
-                        <span
-                          className="px-3 py-1 rounded-full text-xs font-medium"
-                          style={{ background: STATUS_CONFIG[selectedTask.status].bg, color: STATUS_CONFIG[selectedTask.status].color }}
-                        >
-                          {STATUS_CONFIG[selectedTask.status].label}
-                        </span>
-                      </div>
-                      <h2 className="text-2xl font-bold text-white">{selectedTask.title}</h2>
-                    </div>
-                    <button
-                      onClick={() => setSelectedTask(null)}
-                      className="text-gray-400 hover:text-white text-3xl w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/10 transition-colors duration-75"
-                    >
-                      ×
-                    </button>
-                  </div>
-
-                  <p className="text-gray-300 mb-6 text-lg">{selectedTask.description}</p>
-
-                  <div className="space-y-4 mb-8">
-                    {selectedTask.assignee && (
-                      <div className="flex items-center gap-4">
-                        <span className="text-gray-500 w-24">Assignee</span>
-                        <div
-                          className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-black shadow-lg"
-                          style={{ background: AGENT_COLORS[selectedTask.assignee], boxShadow: `0 0 20px ${AGENT_COLORS[selectedTask.assignee]}50` }}
-                        >
-                          {selectedTask.assignee[0]}
-                        </div>
-                        <span className="text-white font-medium">{selectedTask.assignee}</span>
-                      </div>
-                    )}
-
-                    {selectedTask.dueDate && (
-                      <div className="flex items-center gap-4">
-                        <span className="text-gray-500 w-24">Due Date</span>
-                        <span className="text-white font-medium">{selectedTask.dueDate}</span>
-                      </div>
-                    )}
-
-                    <div className="flex items-center gap-4">
-                      <span className="text-gray-500 w-24">Tags</span>
-                      <div className="flex gap-2 flex-wrap">
-                        {selectedTask.tags.map(tag => (
-                          <span key={tag} className="px-3 py-1 rounded-full text-sm bg-white/10 text-gray-300">{tag}</span>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex gap-3">
-                    <button className="btn-gradient flex-1 py-3.5 rounded-xl font-medium text-white hover:opacity-90 transition-opacity duration-75">
-                      Edit Task
-                    </button>
-                    <button className="px-6 py-3.5 rounded-xl bg-red-500/20 text-red-400 font-medium hover:bg-red-500/30 transition-colors duration-75">
-                      Delete
-                    </button>
-                  </div>
-                </GlassCard>
-              </motion.div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Add Task Modal */}
-        {showAddModal && (
-          <div
-            className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-50 p-4"
-            onClick={() => setShowAddModal(false)}
-          >
-            <div
-              onClick={e => e.stopPropagation()}
-              className="w-full max-w-lg"
-            >
-              <GlassCard className="p-8" >
-                <div className="flex items-center justify-between mb-6">
-                  <h2 className="text-2xl font-bold text-white">Add New Task</h2>
-                  <button
-                    onClick={() => setShowAddModal(false)}
-                    className="text-gray-400 hover:text-white text-3xl w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/10 transition-colors duration-75"
-                  >
-                    ×
-                  </button>
-                </div>
-
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm text-gray-400 mb-2">Title *</label>
-                    <input
-                      type="text"
-                      value={newTask.title}
-                      onChange={e => setNewTask({ ...newTask, title: e.target.value })}
-                      placeholder="Enter task title..."
-                      className="w-full p-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm text-gray-400 mb-2">Description</label>
-                    <textarea
-                      value={newTask.description}
-                      onChange={e => setNewTask({ ...newTask, description: e.target.value })}
-                      placeholder="Enter description..."
-                      rows={3}
-                      className="w-full p-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500 resize-none"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm text-gray-400 mb-2">Priority</label>
-                      <select
-                        value={newTask.priority}
-                        onChange={e => setNewTask({ ...newTask, priority: e.target.value as Priority })}
-                        className="w-full p-3 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none focus:border-cyan-500"
-                      >
-                        <option value="low">Low</option>
-                        <option value="medium">Medium</option>
-                        <option value="high">High</option>
-                        <option value="urgent">Urgent</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm text-gray-400 mb-2">Assignee</label>
-                      <select
-                        value={newTask.assignee}
-                        onChange={e => setNewTask({ ...newTask, assignee: e.target.value as Agent })}
-                        className="w-full p-3 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none focus:border-cyan-500"
-                      >
-                        <option value="">Unassigned</option>
-                        {AGENTS.map(agent => (
-                          <option key={agent} value={agent}>{agent}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm text-gray-400 mb-2">Status</label>
-                    <select
-                      value={newTask.status}
-                      onChange={e => setNewTask({ ...newTask, status: e.target.value as TaskStatus })}
-                      className="w-full p-3 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none focus:border-cyan-500"
-                    >
-                      {(Object.keys(STATUS_CONFIG) as TaskStatus[]).map(status => (
-                        <option key={status} value={status}>{STATUS_CONFIG[status].label}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="flex gap-3 mt-6">
-                  <button
-                    onClick={addTask}
-                    className="btn-gradient flex-1 py-3.5 rounded-xl font-medium text-white hover:opacity-90 transition-opacity duration-75"
-                  >
-                    Create Task
-                  </button>
-                  <button
-                    onClick={() => setShowAddModal(false)}
-                    className="px-6 py-3.5 rounded-xl bg-white/10 text-gray-300 font-medium hover:bg-white/20 transition-colors duration-75"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </GlassCard>
+          <GlassCard className="overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-white/10">
+                    <th className="text-left p-4 text-sm text-gray-400 font-medium">Task</th>
+                    <th className="text-left p-4 text-sm text-gray-400 font-medium">Status</th>
+                    <th className="text-left p-4 text-sm text-gray-400 font-medium">Priority</th>
+                    <th className="text-left p-4 text-sm text-gray-400 font-medium">Assignee</th>
+                    <th className="text-left p-4 text-sm text-gray-400 font-medium">Due</th>
+                    <th className="text-left p-4 text-sm text-gray-400 font-medium">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tasks.map(task => (
+                    <tr key={task.id} className="border-b border-white/5 hover:bg-white/5 transition-colors duration-75">
+                      <td className="p-4">
+                        <div className="font-medium text-white text-sm">{task.title}</div>
+                        <div className="text-xs text-gray-500 line-clamp-1">{task.description}</div>
+                      </td>
+                      <td className="p-4"><span className="px-2 py-1 rounded-full text-xs font-medium" style={{ background: STATUS_CONFIG[task.status].bg, color: STATUS_CONFIG[task.status].color }}>{STATUS_CONFIG[task.status].label}</span></td>
+                      <td className="p-4"><span className="flex items-center gap-1 text-sm" style={{ color: PRIORITY_CONFIG[task.priority].color }}><span>{PRIORITY_CONFIG[task.priority].icon}</span>{PRIORITY_CONFIG[task.priority].label}</span></td>
+                      <td className="p-4">{task.assignee && <div className="flex items-center gap-2"><div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-black" style={{ background: AGENT_COLORS[task.assignee] }}>{task.assignee[0]}</div><span className="text-gray-300 text-sm">{task.assignee}</span></div>}</td>
+                      <td className="p-4 text-gray-400 text-sm">{task.dueDate || '-'}</td>
+                      <td className="p-4"><button onClick={() => deleteTask(task.id)} className="text-red-400 hover:text-red-300 text-sm transition-colors">Delete</button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          </div>
+          </GlassCard>
         )}
       </div>
+
+      {/* ===== PROJECT DETAIL MODAL ===== */}
+      <AnimatePresence>
+        {selectedProject && !editingProject && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-50 p-4" onClick={() => setSelectedProject(null)}>
+            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+              onClick={e => e.stopPropagation()} className="w-full max-w-lg">
+              <GlassCard className="p-8">
+                <div className="flex items-start justify-between mb-4">
+                  <div>
+                    <span className="px-2.5 py-1 rounded-full text-xs font-bold" style={{ background: PROJECT_STATUS_CONFIG[selectedProject.status].bg, color: PROJECT_STATUS_CONFIG[selectedProject.status].color }}>
+                      {PROJECT_STATUS_CONFIG[selectedProject.status].label}
+                    </span>
+                    <h2 className="text-2xl font-bold text-white mt-2">{selectedProject.name}</h2>
+                  </div>
+                  <button onClick={() => setSelectedProject(null)} className="text-gray-400 hover:text-white text-2xl w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/10">×</button>
+                </div>
+                <p className="text-gray-300 mb-6">{selectedProject.description}</p>
+                <div className="space-y-3 mb-6">
+                  <div className="flex justify-between"><span className="text-gray-500">Category</span><span className="text-white">{selectedProject.category}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">Tech Stack</span><span className="text-white text-sm">{selectedProject.techStack}</span></div>
+                  <div className="flex justify-between items-center"><span className="text-gray-500">Owner</span>
+                    <div className="flex items-center gap-2"><div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-black" style={{ background: AGENT_COLORS[selectedProject.owner] }}>{selectedProject.owner[0]}</div><span className="text-white">{selectedProject.owner}</span></div>
+                  </div>
+                  <div className="flex justify-between"><span className="text-gray-500">Design Score</span><span className="text-white">{selectedProject.designScore}/10</span></div>
+                  {selectedProject.url && <div className="flex justify-between"><span className="text-gray-500">URL</span><a href={selectedProject.url} target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:text-cyan-300 text-sm">{selectedProject.url.replace('https://', '')}</a></div>}
+                </div>
+                <div className="flex gap-3">
+                  <button onClick={() => { setEditingProject(selectedProject); setSelectedProject(null) }} className="btn-gradient flex-1 py-3 rounded-xl font-medium text-white">Edit</button>
+                  <button onClick={() => deleteProject(selectedProject.id)} className="px-6 py-3 rounded-xl bg-red-500/20 text-red-400 font-medium hover:bg-red-500/30 transition-colors">Delete</button>
+                </div>
+              </GlassCard>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ===== EDIT PROJECT MODAL ===== */}
+      {editingProject && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-50 p-4" onClick={() => setEditingProject(null)}>
+          <div onClick={e => e.stopPropagation()} className="w-full max-w-lg">
+            <GlassCard className="p-8">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl font-bold text-white">Edit Project</h2>
+                <button onClick={() => setEditingProject(null)} className="text-gray-400 hover:text-white text-2xl w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/10">×</button>
+              </div>
+              <div className="space-y-4">
+                <div><label className="block text-sm text-gray-400 mb-1">Name</label><input type="text" value={editingProject.name} onChange={e => setEditingProject({ ...editingProject, name: e.target.value })} className={inputClass} /></div>
+                <div><label className="block text-sm text-gray-400 mb-1">Description</label><textarea value={editingProject.description} onChange={e => setEditingProject({ ...editingProject, description: e.target.value })} rows={2} className={inputClass + ' resize-none'} /></div>
+                <div><label className="block text-sm text-gray-400 mb-1">URL</label><input type="text" value={editingProject.url} onChange={e => setEditingProject({ ...editingProject, url: e.target.value })} className={inputClass} /></div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div><label className="block text-sm text-gray-400 mb-1">Status</label>
+                    <select value={editingProject.status} onChange={e => setEditingProject({ ...editingProject, status: e.target.value as ProjectStatus })} className={selectClass}>
+                      {Object.entries(PROJECT_STATUS_CONFIG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                    </select></div>
+                  <div><label className="block text-sm text-gray-400 mb-1">Category</label>
+                    <select value={editingProject.category} onChange={e => setEditingProject({ ...editingProject, category: e.target.value })} className={selectClass}>
+                      {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select></div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div><label className="block text-sm text-gray-400 mb-1">Owner</label>
+                    <select value={editingProject.owner} onChange={e => setEditingProject({ ...editingProject, owner: e.target.value as Agent })} className={selectClass}>
+                      {AGENTS.map(a => <option key={a} value={a}>{a}</option>)}
+                    </select></div>
+                  <div><label className="block text-sm text-gray-400 mb-1">Design Score (0-10)</label>
+                    <input type="number" min={0} max={10} value={editingProject.designScore} onChange={e => setEditingProject({ ...editingProject, designScore: Number(e.target.value) })} className={inputClass} /></div>
+                </div>
+                <div><label className="block text-sm text-gray-400 mb-1">Tech Stack</label><input type="text" value={editingProject.techStack} onChange={e => setEditingProject({ ...editingProject, techStack: e.target.value })} className={inputClass} /></div>
+              </div>
+              <div className="flex gap-3 mt-6">
+                <button onClick={updateProject} className="btn-gradient flex-1 py-3 rounded-xl font-medium text-white">Save Changes</button>
+                <button onClick={() => setEditingProject(null)} className="px-6 py-3 rounded-xl bg-white/10 text-gray-300 font-medium hover:bg-white/20 transition-colors">Cancel</button>
+              </div>
+            </GlassCard>
+          </div>
+        </div>
+      )}
+
+      {/* ===== ADD PROJECT MODAL ===== */}
+      {showAddProject && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-50 p-4" onClick={() => setShowAddProject(false)}>
+          <div onClick={e => e.stopPropagation()} className="w-full max-w-lg">
+            <GlassCard className="p-8">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl font-bold text-white">New Project</h2>
+                <button onClick={() => setShowAddProject(false)} className="text-gray-400 hover:text-white text-2xl w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/10">×</button>
+              </div>
+              <div className="space-y-4">
+                <div><label className="block text-sm text-gray-400 mb-1">Name *</label><input type="text" value={newProject.name} onChange={e => setNewProject({ ...newProject, name: e.target.value })} placeholder="Project name..." className={inputClass} /></div>
+                <div><label className="block text-sm text-gray-400 mb-1">Description</label><textarea value={newProject.description} onChange={e => setNewProject({ ...newProject, description: e.target.value })} placeholder="What does this project do?" rows={2} className={inputClass + ' resize-none'} /></div>
+                <div><label className="block text-sm text-gray-400 mb-1">URL</label><input type="text" value={newProject.url} onChange={e => setNewProject({ ...newProject, url: e.target.value })} placeholder="https://..." className={inputClass} /></div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div><label className="block text-sm text-gray-400 mb-1">Status</label>
+                    <select value={newProject.status} onChange={e => setNewProject({ ...newProject, status: e.target.value as ProjectStatus })} className={selectClass}>
+                      {Object.entries(PROJECT_STATUS_CONFIG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                    </select></div>
+                  <div><label className="block text-sm text-gray-400 mb-1">Category</label>
+                    <select value={newProject.category} onChange={e => setNewProject({ ...newProject, category: e.target.value })} className={selectClass}>
+                      {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select></div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div><label className="block text-sm text-gray-400 mb-1">Owner</label>
+                    <select value={newProject.owner} onChange={e => setNewProject({ ...newProject, owner: e.target.value as Agent })} className={selectClass}>
+                      {AGENTS.map(a => <option key={a} value={a}>{a}</option>)}
+                    </select></div>
+                  <div><label className="block text-sm text-gray-400 mb-1">Tech Stack</label><input type="text" value={newProject.techStack} onChange={e => setNewProject({ ...newProject, techStack: e.target.value })} placeholder="Next.js, React..." className={inputClass} /></div>
+                </div>
+              </div>
+              <div className="flex gap-3 mt-6">
+                <button onClick={addProject} className="btn-gradient flex-1 py-3 rounded-xl font-medium text-white">Create Project</button>
+                <button onClick={() => setShowAddProject(false)} className="px-6 py-3 rounded-xl bg-white/10 text-gray-300 font-medium hover:bg-white/20 transition-colors">Cancel</button>
+              </div>
+            </GlassCard>
+          </div>
+        </div>
+      )}
+
+      {/* ===== ADD TASK MODAL ===== */}
+      {showAddTask && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-50 p-4" onClick={() => setShowAddTask(false)}>
+          <div onClick={e => e.stopPropagation()} className="w-full max-w-lg">
+            <GlassCard className="p-8">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl font-bold text-white">New Task</h2>
+                <button onClick={() => setShowAddTask(false)} className="text-gray-400 hover:text-white text-2xl w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/10">×</button>
+              </div>
+              <div className="space-y-4">
+                <div><label className="block text-sm text-gray-400 mb-1">Title *</label><input type="text" value={newTask.title} onChange={e => setNewTask({ ...newTask, title: e.target.value })} placeholder="Task title..." className={inputClass} /></div>
+                <div><label className="block text-sm text-gray-400 mb-1">Description</label><textarea value={newTask.description} onChange={e => setNewTask({ ...newTask, description: e.target.value })} placeholder="Details..." rows={2} className={inputClass + ' resize-none'} /></div>
+                <div className="grid grid-cols-3 gap-3">
+                  <div><label className="block text-sm text-gray-400 mb-1">Priority</label>
+                    <select value={newTask.priority} onChange={e => setNewTask({ ...newTask, priority: e.target.value as Priority })} className={selectClass}>
+                      <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="urgent">Urgent</option>
+                    </select></div>
+                  <div><label className="block text-sm text-gray-400 mb-1">Assignee</label>
+                    <select value={newTask.assignee} onChange={e => setNewTask({ ...newTask, assignee: e.target.value as Agent })} className={selectClass}>
+                      <option value="">None</option>{AGENTS.map(a => <option key={a} value={a}>{a}</option>)}
+                    </select></div>
+                  <div><label className="block text-sm text-gray-400 mb-1">Status</label>
+                    <select value={newTask.status} onChange={e => setNewTask({ ...newTask, status: e.target.value as TaskStatus })} className={selectClass}>
+                      {(Object.keys(STATUS_CONFIG) as TaskStatus[]).map(s => <option key={s} value={s}>{STATUS_CONFIG[s].label}</option>)}
+                    </select></div>
+                </div>
+              </div>
+              <div className="flex gap-3 mt-6">
+                <button onClick={addTask} className="btn-gradient flex-1 py-3 rounded-xl font-medium text-white">Create Task</button>
+                <button onClick={() => setShowAddTask(false)} className="px-6 py-3 rounded-xl bg-white/10 text-gray-300 font-medium hover:bg-white/20 transition-colors">Cancel</button>
+              </div>
+            </GlassCard>
+          </div>
+        </div>
+      )}
+
+      {/* ===== TASK DETAIL MODAL ===== */}
+      <AnimatePresence>
+        {selectedTask && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-50 p-4" onClick={() => setSelectedTask(null)}>
+            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+              onClick={e => e.stopPropagation()} className="w-full max-w-lg">
+              <GlassCard className="p-8">
+                <div className="flex items-start justify-between mb-4">
+                  <div>
+                    <div className="flex items-center gap-2 mb-2">
+                      <span style={{ color: PRIORITY_CONFIG[selectedTask.priority].color }}>{PRIORITY_CONFIG[selectedTask.priority].icon}</span>
+                      <span className="px-2 py-1 rounded-full text-xs font-medium" style={{ background: STATUS_CONFIG[selectedTask.status].bg, color: STATUS_CONFIG[selectedTask.status].color }}>{STATUS_CONFIG[selectedTask.status].label}</span>
+                    </div>
+                    <h2 className="text-2xl font-bold text-white">{selectedTask.title}</h2>
+                  </div>
+                  <button onClick={() => setSelectedTask(null)} className="text-gray-400 hover:text-white text-2xl w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/10">×</button>
+                </div>
+                <p className="text-gray-300 mb-6">{selectedTask.description}</p>
+                <div className="space-y-3 mb-6">
+                  {selectedTask.assignee && <div className="flex items-center gap-3"><span className="text-gray-500 w-20">Assignee</span><div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-black" style={{ background: AGENT_COLORS[selectedTask.assignee] }}>{selectedTask.assignee[0]}</div><span className="text-white">{selectedTask.assignee}</span></div>}
+                  {selectedTask.dueDate && <div className="flex items-center gap-3"><span className="text-gray-500 w-20">Due</span><span className="text-white">{selectedTask.dueDate}</span></div>}
+                </div>
+                <div className="flex gap-3">
+                  <select value={selectedTask.status} onChange={e => { updateTaskStatus(selectedTask.id, e.target.value as TaskStatus); setSelectedTask({ ...selectedTask, status: e.target.value as TaskStatus }) }}
+                    className="flex-1 py-3 rounded-xl bg-white/10 border border-white/20 text-white text-center font-medium">
+                    {(Object.keys(STATUS_CONFIG) as TaskStatus[]).map(s => <option key={s} value={s}>{STATUS_CONFIG[s].label}</option>)}
+                  </select>
+                  <button onClick={() => deleteTask(selectedTask.id)} className="px-6 py-3 rounded-xl bg-red-500/20 text-red-400 font-medium hover:bg-red-500/30 transition-colors">Delete</button>
+                </div>
+              </GlassCard>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }

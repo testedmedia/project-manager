@@ -18,7 +18,7 @@ body {
 }
 
 /* ============================================
-   GLASSMORPHISM EFFECTS
+   GLASSMORPHISM EFFECTS (GPU-optimized)
    ============================================ */
 .glass-card {
   background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 100%);
@@ -26,16 +26,15 @@ body {
   backdrop-filter: blur(20px);
   border: 1px solid rgba(255, 255, 255, 0.15);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1);
-}
-
-.glass-card:hover {
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  will-change: transform;
+  transform: translateZ(0);
+  contain: layout style paint;
 }
 
 .glass-task {
   background: linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.02) 100%);
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
+  transform: translateZ(0);
+  contain: layout style paint;
 }
 
 /* Glass shimmer overlay */
@@ -59,6 +58,8 @@ body {
 .orb {
   border-radius: 9999px;
   position: absolute;
+  transform: translateZ(0);
+  contain: strict;
 }
 
 .orb-blue {
@@ -85,10 +86,17 @@ body {
 .btn-gradient {
   background: linear-gradient(135deg, #3B82F6 0%, #8B5CF6 100%);
   box-shadow: 0 8px 32px rgba(59, 130, 246, 0.4);
+  will-change: transform;
+  transform: translateZ(0);
+  transition: transform 75ms ease-out;
 }
 
 .btn-gradient:hover {
-  box-shadow: 0 12px 40px rgba(59, 130, 246, 0.5);
+  transform: translateY(-1px) translateZ(0);
+}
+
+.btn-gradient:active {
+  transform: translateY(0) translateZ(0);
 }
 
 .tab-active {
