@@ -27,6 +27,10 @@ interface Task {
   projectId?: string
 }
 
+interface DeletedTask extends Task {
+  deletedAt: string
+}
+
 interface Project {
   id: string
   name: string
@@ -104,6 +108,8 @@ const DEFAULT_TASKS: Task[] = [
 // ============================================
 const STORAGE_KEY_PROJECTS = 'pm_projects'
 const STORAGE_KEY_TASKS = 'pm_tasks'
+const STORAGE_KEY_DELETED = 'pm_deleted_tasks'
+const MAX_DELETED = 20
 
 function loadLocal<T>(key: string, defaults: T): T {
   if (typeof window === 'undefined') return defaults
@@ -118,23 +124,23 @@ function saveLocal<T>(key: string, data: T) {
   localStorage.setItem(key, JSON.stringify(data))
 }
 
-async function saveToApi(tasks: Task[], projects: Project[]) {
+async function saveToApi(tasks: Task[], projects: Project[], deleted?: DeletedTask[]) {
   try {
     await fetch('/api/data', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tasks, projects })
+      body: JSON.stringify({ tasks, projects, deletedTasks: deleted })
     })
   } catch (e) { console.error('API save error:', e) }
 }
 
-async function loadFromApi(): Promise<{ tasks: Task[]; projects: Project[] } | null> {
+async function loadFromApi(): Promise<{ tasks: Task[]; projects: Project[]; deletedTasks: DeletedTask[] } | null> {
   try {
     const res = await fetch('/api/data')
     if (!res.ok) return null
     const data = await res.json()
     if (data.source === 'supabase' && (data.tasks?.length > 0 || data.projects?.length > 0)) {
-      return { tasks: data.tasks, projects: data.projects }
+      return { tasks: data.tasks, projects: data.projects, deletedTasks: data.deletedTasks || [] }
     }
     return null
   } catch { return null }
@@ -181,7 +187,12 @@ export default function ProjectManager() {
   const [newProject, setNewProject] = useState<Omit<Project, 'id' | 'createdAt'>>({
     name: '', description: '', url: '', status: 'planned', category: 'Dashboard', techStack: '', owner: 'Jarvis', designScore: 5
   })
-  const [newTask, setNewTask] = useState({ title: '', description: '', priority: 'medium' as Priority, assignee: '' as Agent | '', status: 'todo' as TaskStatus })
+  const [newTask, setNewTask] = useState({ title: '', description: '', priority: 'medium' as Priority, assignee: '' as Agent | '', status: 'todo' as TaskStatus, dueDate: '', projectId: '' })
+  const [deletedTasks, setDeletedTasks] = useState<DeletedTask[]>([])
+  const [showTrash, setShowTrash] = useState(false)
+  const [editingTask, setEditingTask] = useState<Task | null>(null)
+  const [taskSearch, setTaskSearch] = useState('')
+  const [confirmDelete, setConfirmDelete] = useState<{ type: 'task' | 'project'; id: string; name: string } | null>(null)
 
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'saved' | 'error'>('idle')
   const saveTimer = useRef<NodeJS.Timeout | null>(null)
@@ -193,8 +204,10 @@ export default function ProjectManager() {
       // Instant load from localStorage cache
       const localP = loadLocal(STORAGE_KEY_PROJECTS, DEFAULT_PROJECTS)
       const localT = loadLocal(STORAGE_KEY_TASKS, DEFAULT_TASKS)
+      const localD = loadLocal<DeletedTask[]>(STORAGE_KEY_DELETED, [])
       setProjects(localP)
       setTasks(localT)
+      setDeletedTasks(localD)
 
       // Then try API
       setSyncStatus('syncing')
@@ -202,12 +215,14 @@ export default function ProjectManager() {
       if (apiData) {
         setProjects(apiData.projects.length > 0 ? apiData.projects : localP)
         setTasks(apiData.tasks.length > 0 ? apiData.tasks : localT)
+        setDeletedTasks(apiData.deletedTasks || localD)
         saveLocal(STORAGE_KEY_PROJECTS, apiData.projects.length > 0 ? apiData.projects : localP)
         saveLocal(STORAGE_KEY_TASKS, apiData.tasks.length > 0 ? apiData.tasks : localT)
+        saveLocal(STORAGE_KEY_DELETED, apiData.deletedTasks || localD)
         setSyncStatus('saved')
       } else {
         // No API data - seed API with defaults/local
-        await saveToApi(localT, localP)
+        await saveToApi(localT, localP, localD)
         setSyncStatus('saved')
       }
       isInitialLoad.current = false
@@ -216,20 +231,25 @@ export default function ProjectManager() {
   }, [])
 
   // Debounced save to API + localStorage
-  const debouncedSave = useCallback((t: Task[], p: Project[]) => {
+  const debouncedSave = useCallback((t: Task[], p: Project[], d?: DeletedTask[]) => {
     saveLocal(STORAGE_KEY_TASKS, t)
     saveLocal(STORAGE_KEY_PROJECTS, p)
+    if (d) saveLocal(STORAGE_KEY_DELETED, d)
     if (saveTimer.current) clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(async () => {
       setSyncStatus('syncing')
-      await saveToApi(t, p)
+      await saveToApi(t, p, d)
       setSyncStatus('saved')
     }, 800)
   }, [])
 
   // Persist on change
-  const persistProjects = useCallback((p: Project[]) => { setProjects(p); debouncedSave(tasks, p) }, [tasks, debouncedSave])
-  const persistTasks = useCallback((t: Task[]) => { setTasks(t); debouncedSave(t, projects) }, [projects, debouncedSave])
+  const persistProjects = useCallback((p: Project[]) => { setProjects(p); debouncedSave(tasks, p, deletedTasks) }, [tasks, deletedTasks, debouncedSave])
+  const persistTasks = useCallback((t: Task[], d?: DeletedTask[]) => {
+    setTasks(t)
+    if (d) setDeletedTasks(d)
+    debouncedSave(t, projects, d || deletedTasks)
+  }, [projects, deletedTasks, debouncedSave])
 
   // CRUD: Projects
   const addProject = () => {
@@ -257,15 +277,45 @@ export default function ProjectManager() {
     const task: Task = {
       id: Date.now().toString(), title: newTask.title, description: newTask.description,
       status: newTask.status, priority: newTask.priority, assignee: newTask.assignee || null,
-      dueDate: null, tags: [], createdAt: new Date().toISOString().split('T')[0]
+      dueDate: newTask.dueDate || null, tags: [], createdAt: new Date().toISOString().split('T')[0],
+      projectId: newTask.projectId || undefined
     }
     persistTasks([task, ...tasks])
-    setNewTask({ title: '', description: '', priority: 'medium', assignee: '', status: 'todo' })
+    setNewTask({ title: '', description: '', priority: 'medium', assignee: '', status: 'todo', dueDate: '', projectId: '' })
     setShowAddTask(false)
   }
 
-  const deleteTask = (id: string) => {
-    persistTasks(tasks.filter(t => t.id !== id))
+  const softDeleteTask = (id: string) => {
+    const task = tasks.find(t => t.id === id)
+    if (!task) return
+    const deleted: DeletedTask = { ...task, deletedAt: new Date().toISOString() }
+    const newDeleted = [deleted, ...deletedTasks].slice(0, MAX_DELETED)
+    setDeletedTasks(newDeleted)
+    const newTasks = tasks.filter(t => t.id !== id)
+    persistTasks(newTasks, newDeleted)
+    setSelectedTask(null)
+    setConfirmDelete(null)
+  }
+
+  const restoreTask = (id: string) => {
+    const task = deletedTasks.find(t => t.id === id)
+    if (!task) return
+    const { deletedAt, ...restored } = task
+    const newDeleted = deletedTasks.filter(t => t.id !== id)
+    setDeletedTasks(newDeleted)
+    persistTasks([restored, ...tasks], newDeleted)
+  }
+
+  const permanentDeleteTask = (id: string) => {
+    const newDeleted = deletedTasks.filter(t => t.id !== id)
+    setDeletedTasks(newDeleted)
+    saveLocal(STORAGE_KEY_DELETED, newDeleted)
+    debouncedSave(tasks, projects, newDeleted)
+  }
+
+  const updateTask = (updated: Task) => {
+    persistTasks(tasks.map(t => t.id === updated.id ? updated : t))
+    setEditingTask(null)
     setSelectedTask(null)
   }
 
@@ -292,11 +342,17 @@ export default function ProjectManager() {
     overdue: tasks.filter(t => t.dueDate && new Date(t.dueDate) < new Date() && t.status !== 'done').length
   }), [tasks])
 
+  const filteredTasks = useMemo(() => {
+    if (!taskSearch) return tasks
+    const q = taskSearch.toLowerCase()
+    return tasks.filter(t => t.title.toLowerCase().includes(q) || t.description.toLowerCase().includes(q) || t.assignee?.toLowerCase().includes(q))
+  }, [tasks, taskSearch])
+
   const tasksByStatus = useMemo(() => {
     const grouped: Record<TaskStatus, Task[]> = { backlog: [], todo: [], in_progress: [], review: [], done: [] }
-    tasks.forEach(t => grouped[t.status].push(t))
+    filteredTasks.forEach(t => grouped[t.status].push(t))
     return grouped
-  }, [tasks])
+  }, [filteredTasks])
 
   const filteredProjects = useMemo(() => {
     return projects.filter(p => {
@@ -355,6 +411,12 @@ export default function ProjectManager() {
             <button onClick={() => setShowAddTask(true)} className="px-4 py-2 rounded-xl font-medium text-white text-sm bg-white/10 border border-white/20 hover:bg-white/20 transition-colors duration-75">
               <span>+ Task</span>
             </button>
+            {deletedTasks.length > 0 && (
+              <button onClick={() => setShowTrash(true)} className="relative px-3 py-2 rounded-xl text-sm bg-white/5 border border-white/10 hover:bg-white/10 transition-colors duration-75 text-gray-400 hover:text-white">
+                <span>🗑️</span>
+                <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center font-bold">{deletedTasks.length}</span>
+              </button>
+            )}
           </div>
         </div>
         <div className="md:hidden flex items-center gap-1 px-4 pb-3 overflow-x-auto">
@@ -422,10 +484,8 @@ export default function ProjectManager() {
 
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-black"
-                          style={{ background: AGENT_COLORS[project.owner] }}>
-                          {project.owner[0]}
-                        </div>
+                        <span className="text-xs text-gray-400">{tasks.filter(t => t.projectId === project.id).length} tasks</span>
+                        <span className="text-xs text-gray-600">|</span>
                         <span className="text-xs text-gray-400">{project.owner}</span>
                       </div>
                       <div className="flex items-center gap-1">
@@ -490,18 +550,37 @@ export default function ProjectManager() {
                 </div>
               </GlassCard>
               <GlassCard className="p-6">
-                <h3 className="text-lg font-semibold text-white mb-4">Team</h3>
-                <div className="space-y-3">
-                  {AGENTS.map(agent => (
-                    <div key={agent} className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-black" style={{ background: AGENT_COLORS[agent] }}>{agent[0]}</div>
-                      <span className="text-gray-300 flex-1 text-sm">{agent}</span>
-                      <span className="text-white font-bold text-sm">{tasks.filter(t => t.assignee === agent).length}</span>
+                <h3 className="text-lg font-semibold text-white mb-4">Tasks per Project</h3>
+                <div className="space-y-3 max-h-[300px] overflow-y-auto">
+                  {projects.map(proj => {
+                    const count = tasks.filter(t => t.projectId === proj.id).length
+                    return (
+                      <div key={proj.id} className="flex items-center gap-3">
+                        <div className="w-2 h-2 rounded-full bg-cyan-400 flex-shrink-0" />
+                        <span className="text-gray-300 flex-1 text-sm truncate">{proj.name}</span>
+                        <span className="text-white font-bold text-sm">{count}</span>
+                      </div>
+                    )
+                  })}
+                  {(() => { const unassigned = tasks.filter(t => !t.projectId).length; return unassigned > 0 ? (
+                    <div className="flex items-center gap-3 pt-2 border-t border-white/10">
+                      <div className="w-2 h-2 rounded-full bg-gray-500 flex-shrink-0" />
+                      <span className="text-gray-400 flex-1 text-sm">No Project</span>
+                      <span className="text-gray-400 font-bold text-sm">{unassigned}</span>
                     </div>
-                  ))}
+                  ) : null })()}
                 </div>
               </GlassCard>
             </div>
+          </div>
+        )}
+
+        {/* ===== SEARCH BAR (kanban & list) ===== */}
+        {(viewMode === 'kanban' || viewMode === 'list') && (
+          <div className="mb-4">
+            <input type="text" value={taskSearch} onChange={e => setTaskSearch(e.target.value)}
+              placeholder="Search tasks by title, description, or assignee..."
+              className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder-gray-500 focus:outline-none focus:border-white/30 transition-colors text-sm" />
           </div>
         )}
 
@@ -527,7 +606,7 @@ export default function ProjectManager() {
                       </div>
                       <p className="text-xs text-gray-400 line-clamp-2 mb-2">{task.description}</p>
                       <div className="flex items-center justify-between">
-                        {task.assignee && <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-black" style={{ background: AGENT_COLORS[task.assignee] }}>{task.assignee[0]}</div>}
+                        {task.projectId && <span className="text-xs px-2 py-0.5 rounded-full bg-white/10 text-gray-300 truncate max-w-[120px]">{projects.find(p => p.id === task.projectId)?.name || 'Unknown'}</span>}
                         {task.dueDate && <span className={`text-xs ${task.dueDate && new Date(task.dueDate) < new Date() && task.status !== 'done' ? 'text-red-400' : 'text-gray-500'}`}>{task.dueDate}</span>}
                       </div>
                     </div>
@@ -547,25 +626,25 @@ export default function ProjectManager() {
                 <thead>
                   <tr className="border-b border-white/10">
                     <th className="text-left p-4 text-sm text-gray-400 font-medium">Task</th>
+                    <th className="text-left p-4 text-sm text-gray-400 font-medium">Project</th>
                     <th className="text-left p-4 text-sm text-gray-400 font-medium">Status</th>
                     <th className="text-left p-4 text-sm text-gray-400 font-medium">Priority</th>
-                    <th className="text-left p-4 text-sm text-gray-400 font-medium">Assignee</th>
                     <th className="text-left p-4 text-sm text-gray-400 font-medium">Due</th>
                     <th className="text-left p-4 text-sm text-gray-400 font-medium">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {tasks.map(task => (
-                    <tr key={task.id} className="border-b border-white/5 hover:bg-white/5 transition-colors duration-75">
+                  {filteredTasks.map(task => (
+                    <tr key={task.id} className="border-b border-white/5 hover:bg-white/5 transition-colors duration-75 cursor-pointer" onClick={() => setSelectedTask(task)}>
                       <td className="p-4">
                         <div className="font-medium text-white text-sm">{task.title}</div>
                         <div className="text-xs text-gray-500 line-clamp-1">{task.description}</div>
                       </td>
+                      <td className="p-4"><span className="text-sm text-gray-300">{task.projectId ? projects.find(p => p.id === task.projectId)?.name || '-' : '-'}</span></td>
                       <td className="p-4"><span className="px-2 py-1 rounded-full text-xs font-medium" style={{ background: STATUS_CONFIG[task.status].bg, color: STATUS_CONFIG[task.status].color }}>{STATUS_CONFIG[task.status].label}</span></td>
                       <td className="p-4"><span className="flex items-center gap-1 text-sm" style={{ color: PRIORITY_CONFIG[task.priority].color }}><span>{PRIORITY_CONFIG[task.priority].icon}</span>{PRIORITY_CONFIG[task.priority].label}</span></td>
-                      <td className="p-4">{task.assignee && <div className="flex items-center gap-2"><div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-black" style={{ background: AGENT_COLORS[task.assignee] }}>{task.assignee[0]}</div><span className="text-gray-300 text-sm">{task.assignee}</span></div>}</td>
                       <td className="p-4 text-gray-400 text-sm">{task.dueDate || '-'}</td>
-                      <td className="p-4"><button onClick={() => deleteTask(task.id)} className="text-red-400 hover:text-red-300 text-sm transition-colors">Delete</button></td>
+                      <td className="p-4"><button onClick={() => setConfirmDelete({ type: 'task', id: task.id, name: task.title })} className="text-red-400 hover:text-red-300 text-sm transition-colors">Delete</button></td>
                     </tr>
                   ))}
                 </tbody>
@@ -602,9 +681,31 @@ export default function ProjectManager() {
                   <div className="flex justify-between"><span className="text-gray-500">Design Score</span><span className="text-white">{selectedProject.designScore}/10</span></div>
                   {selectedProject.url && <div className="flex justify-between"><span className="text-gray-500">URL</span><a href={selectedProject.url} target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:text-cyan-300 text-sm">{selectedProject.url.replace('https://', '')}</a></div>}
                 </div>
+                {/* Project Tasks */}
+                {(() => {
+                  const projectTasks = tasks.filter(t => t.projectId === selectedProject.id)
+                  return projectTasks.length > 0 ? (
+                    <div className="mb-6">
+                      <h3 className="text-sm font-semibold text-gray-400 mb-3">Tasks ({projectTasks.length})</h3>
+                      <div className="space-y-2 max-h-[200px] overflow-y-auto">
+                        {projectTasks.map(t => (
+                          <div key={t.id} className="flex items-center gap-2 p-2 rounded-lg bg-white/5 hover:bg-white/10 transition-colors cursor-pointer"
+                            onClick={() => { setSelectedProject(null); setSelectedTask(t) }}>
+                            <span style={{ color: PRIORITY_CONFIG[t.priority].color }} className="text-sm">{PRIORITY_CONFIG[t.priority].icon}</span>
+                            <span className="text-white text-sm flex-1 truncate">{t.title}</span>
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-medium" style={{ background: STATUS_CONFIG[t.status].bg, color: STATUS_CONFIG[t.status].color }}>{STATUS_CONFIG[t.status].label}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mb-6 py-4 text-center text-gray-500 text-sm border border-dashed border-white/10 rounded-xl">No tasks linked to this project</div>
+                  )
+                })()}
                 <div className="flex gap-3">
-                  <button onClick={() => { setEditingProject(selectedProject); setSelectedProject(null) }} className="btn-gradient flex-1 py-3 rounded-xl font-medium text-white">Edit</button>
-                  <button onClick={() => deleteProject(selectedProject.id)} className="px-6 py-3 rounded-xl bg-red-500/20 text-red-400 font-medium hover:bg-red-500/30 transition-colors">Delete</button>
+                  <button onClick={() => { setNewTask({ ...newTask, projectId: selectedProject.id }); setSelectedProject(null); setShowAddTask(true) }} className="flex-1 py-3 rounded-xl bg-cyan-500/20 text-cyan-400 font-medium hover:bg-cyan-500/30 transition-colors">+ Add Task</button>
+                  <button onClick={() => { setEditingProject(selectedProject); setSelectedProject(null) }} className="flex-1 py-3 rounded-xl btn-gradient font-medium text-white">Edit</button>
+                  <button onClick={() => setConfirmDelete({ type: 'project', id: selectedProject.id, name: selectedProject.name })} className="px-6 py-3 rounded-xl bg-red-500/20 text-red-400 font-medium hover:bg-red-500/30 transition-colors">Delete</button>
                 </div>
               </GlassCard>
             </motion.div>
@@ -706,19 +807,25 @@ export default function ProjectManager() {
               <div className="space-y-4">
                 <div><label className="block text-sm text-gray-400 mb-1">Title *</label><input type="text" value={newTask.title} onChange={e => setNewTask({ ...newTask, title: e.target.value })} placeholder="Task title..." className={inputClass} /></div>
                 <div><label className="block text-sm text-gray-400 mb-1">Description</label><textarea value={newTask.description} onChange={e => setNewTask({ ...newTask, description: e.target.value })} placeholder="Details..." rows={2} className={inputClass + ' resize-none'} /></div>
-                <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1">Project *</label>
+                  <select value={newTask.projectId} onChange={e => setNewTask({ ...newTask, projectId: e.target.value })} className={selectClass}>
+                    <option value="">No Project</option>{projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
                   <div><label className="block text-sm text-gray-400 mb-1">Priority</label>
                     <select value={newTask.priority} onChange={e => setNewTask({ ...newTask, priority: e.target.value as Priority })} className={selectClass}>
                       <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="urgent">Urgent</option>
-                    </select></div>
-                  <div><label className="block text-sm text-gray-400 mb-1">Assignee</label>
-                    <select value={newTask.assignee} onChange={e => setNewTask({ ...newTask, assignee: e.target.value as Agent })} className={selectClass}>
-                      <option value="">None</option>{AGENTS.map(a => <option key={a} value={a}>{a}</option>)}
                     </select></div>
                   <div><label className="block text-sm text-gray-400 mb-1">Status</label>
                     <select value={newTask.status} onChange={e => setNewTask({ ...newTask, status: e.target.value as TaskStatus })} className={selectClass}>
                       {(Object.keys(STATUS_CONFIG) as TaskStatus[]).map(s => <option key={s} value={s}>{STATUS_CONFIG[s].label}</option>)}
                     </select></div>
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1">Due Date</label>
+                  <input type="date" value={newTask.dueDate} onChange={e => setNewTask({ ...newTask, dueDate: e.target.value })} className={inputClass} />
                 </div>
               </div>
               <div className="flex gap-3 mt-6">
@@ -750,16 +857,147 @@ export default function ProjectManager() {
                 </div>
                 <p className="text-gray-300 mb-6">{selectedTask.description}</p>
                 <div className="space-y-3 mb-6">
-                  {selectedTask.assignee && <div className="flex items-center gap-3"><span className="text-gray-500 w-20">Assignee</span><div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-black" style={{ background: AGENT_COLORS[selectedTask.assignee] }}>{selectedTask.assignee[0]}</div><span className="text-white">{selectedTask.assignee}</span></div>}
+                  {selectedTask.projectId && <div className="flex items-center gap-3"><span className="text-gray-500 w-20">Project</span><span className="text-white font-medium">{projects.find(p => p.id === selectedTask.projectId)?.name || 'Unknown'}</span></div>}
                   {selectedTask.dueDate && <div className="flex items-center gap-3"><span className="text-gray-500 w-20">Due</span><span className="text-white">{selectedTask.dueDate}</span></div>}
+                  <div className="flex items-center gap-3"><span className="text-gray-500 w-20">Created</span><span className="text-gray-300">{selectedTask.createdAt}</span></div>
                 </div>
-                <div className="flex gap-3">
+                <div className="flex gap-2">
                   <select value={selectedTask.status} onChange={e => { updateTaskStatus(selectedTask.id, e.target.value as TaskStatus); setSelectedTask({ ...selectedTask, status: e.target.value as TaskStatus }) }}
                     className="flex-1 py-3 rounded-xl bg-white/10 border border-white/20 text-white text-center font-medium">
                     {(Object.keys(STATUS_CONFIG) as TaskStatus[]).map(s => <option key={s} value={s}>{STATUS_CONFIG[s].label}</option>)}
                   </select>
-                  <button onClick={() => deleteTask(selectedTask.id)} className="px-6 py-3 rounded-xl bg-red-500/20 text-red-400 font-medium hover:bg-red-500/30 transition-colors">Delete</button>
+                  <button onClick={() => { setEditingTask(selectedTask); setSelectedTask(null) }} className="px-5 py-3 rounded-xl bg-cyan-500/20 text-cyan-400 font-medium hover:bg-cyan-500/30 transition-colors">Edit</button>
+                  <button onClick={() => setConfirmDelete({ type: 'task', id: selectedTask.id, name: selectedTask.title })} className="px-5 py-3 rounded-xl bg-red-500/20 text-red-400 font-medium hover:bg-red-500/30 transition-colors">Delete</button>
                 </div>
+              </GlassCard>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/* ===== CONFIRM DELETE MODAL ===== */}
+        {confirmDelete && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-[60] p-4" onClick={() => setConfirmDelete(null)}>
+            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+              onClick={e => e.stopPropagation()} className="w-full max-w-sm">
+              <GlassCard className="p-6 text-center">
+                <div className="w-16 h-16 rounded-full bg-red-500/20 flex items-center justify-center mx-auto mb-4">
+                  <span className="text-3xl">🗑️</span>
+                </div>
+                <h3 className="text-xl font-bold text-white mb-2">Delete {confirmDelete.type === 'task' ? 'Task' : 'Project'}?</h3>
+                <p className="text-gray-400 mb-6 text-sm">
+                  {confirmDelete.type === 'task' ? 'This will move' : 'This will permanently delete'} <span className="text-white font-medium">&quot;{confirmDelete.name}&quot;</span>
+                  {confirmDelete.type === 'task' ? ' to the trash bin.' : '.'}
+                </p>
+                <div className="flex gap-3">
+                  <button onClick={() => setConfirmDelete(null)} className="flex-1 py-3 rounded-xl bg-white/10 text-gray-300 font-medium hover:bg-white/20 transition-colors">Cancel</button>
+                  <button onClick={() => {
+                    if (confirmDelete.type === 'task') softDeleteTask(confirmDelete.id)
+                    else { persistProjects(projects.filter(p => p.id !== confirmDelete.id)); setConfirmDelete(null) }
+                  }} className="flex-1 py-3 rounded-xl bg-red-500/20 text-red-400 font-medium hover:bg-red-500/30 transition-colors">Delete</button>
+                </div>
+              </GlassCard>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/* ===== EDIT TASK MODAL ===== */}
+        {editingTask && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-[60] p-4" onClick={() => setEditingTask(null)}>
+            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+              onClick={e => e.stopPropagation()} className="w-full max-w-lg">
+              <GlassCard className="p-8">
+                <div className="flex items-center justify-between mb-6">
+                  <h2 className="text-2xl font-bold text-white">Edit Task</h2>
+                  <button onClick={() => setEditingTask(null)} className="text-gray-400 hover:text-white text-2xl w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/10">×</button>
+                </div>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm text-gray-400 mb-1">Title</label>
+                    <input type="text" value={editingTask.title} onChange={e => setEditingTask({ ...editingTask, title: e.target.value })}
+                      className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-gray-500 focus:outline-none focus:border-white/40 transition-colors" />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-gray-400 mb-1">Description</label>
+                    <textarea value={editingTask.description} onChange={e => setEditingTask({ ...editingTask, description: e.target.value })}
+                      rows={3} className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-gray-500 focus:outline-none focus:border-white/40 transition-colors resize-none" />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-gray-400 mb-1">Project</label>
+                    <select value={editingTask.projectId || ''} onChange={e => setEditingTask({ ...editingTask, projectId: e.target.value || undefined })}
+                      className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none focus:border-white/40 transition-colors">
+                      <option value="">No Project</option>{projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm text-gray-400 mb-1">Priority</label>
+                      <select value={editingTask.priority} onChange={e => setEditingTask({ ...editingTask, priority: e.target.value as Priority })}
+                        className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none focus:border-white/40 transition-colors">
+                        <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="urgent">Urgent</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm text-gray-400 mb-1">Status</label>
+                      <select value={editingTask.status} onChange={e => setEditingTask({ ...editingTask, status: e.target.value as TaskStatus })}
+                        className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none focus:border-white/40 transition-colors">
+                        {(Object.keys(STATUS_CONFIG) as TaskStatus[]).map(s => <option key={s} value={s}>{STATUS_CONFIG[s].label}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm text-gray-400 mb-1">Due Date</label>
+                    <input type="date" value={editingTask.dueDate || ''} onChange={e => setEditingTask({ ...editingTask, dueDate: e.target.value || null })}
+                      className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none focus:border-white/40 transition-colors" />
+                  </div>
+                </div>
+                <div className="flex gap-3 mt-6">
+                  <button onClick={() => setEditingTask(null)} className="flex-1 py-3 rounded-xl bg-white/10 text-gray-300 font-medium hover:bg-white/20 transition-colors">Cancel</button>
+                  <button onClick={() => updateTask(editingTask)} className="flex-1 py-3 rounded-xl btn-gradient text-white font-medium">Save Changes</button>
+                </div>
+              </GlassCard>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/* ===== TRASH BIN MODAL ===== */}
+        {showTrash && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-[60] p-4" onClick={() => setShowTrash(false)}>
+            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+              onClick={e => e.stopPropagation()} className="w-full max-w-lg max-h-[80vh] flex flex-col">
+              <GlassCard className="p-8 flex flex-col overflow-hidden">
+                <div className="flex items-center justify-between mb-6">
+                  <div>
+                    <h2 className="text-2xl font-bold text-white">Trash Bin</h2>
+                    <p className="text-sm text-gray-400 mt-1">{deletedTasks.length} deleted task{deletedTasks.length !== 1 ? 's' : ''} (max {MAX_DELETED})</p>
+                  </div>
+                  <button onClick={() => setShowTrash(false)} className="text-gray-400 hover:text-white text-2xl w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/10">×</button>
+                </div>
+                <div className="overflow-y-auto flex-1 space-y-2 -mx-2 px-2">
+                  {deletedTasks.length === 0 ? (
+                    <div className="text-center py-12 text-gray-500">Trash is empty</div>
+                  ) : deletedTasks.map(task => (
+                    <div key={task.id} className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-colors">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span style={{ color: PRIORITY_CONFIG[task.priority].color }} className="text-sm">{PRIORITY_CONFIG[task.priority].icon}</span>
+                          <span className="text-white text-sm font-medium truncate">{task.title}</span>
+                        </div>
+                        <div className="text-xs text-gray-500 mt-1">Deleted {new Date(task.deletedAt).toLocaleDateString()}</div>
+                      </div>
+                      <button onClick={() => restoreTask(task.id)} className="px-3 py-1.5 rounded-lg text-xs bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30 transition-colors font-medium">Restore</button>
+                      <button onClick={() => permanentDeleteTask(task.id)} className="px-3 py-1.5 rounded-lg text-xs bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors font-medium">Purge</button>
+                    </div>
+                  ))}
+                </div>
+                {deletedTasks.length > 0 && (
+                  <div className="mt-4 pt-4 border-t border-white/10">
+                    <button onClick={() => { setDeletedTasks([]); saveLocal(STORAGE_KEY_DELETED, []); debouncedSave(tasks, projects, []); }}
+                      className="w-full py-3 rounded-xl bg-red-500/10 text-red-400 font-medium hover:bg-red-500/20 transition-colors text-sm">Empty Trash</button>
+                  </div>
+                )}
               </GlassCard>
             </motion.div>
           </motion.div>
