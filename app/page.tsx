@@ -63,18 +63,11 @@ const SAMPLE_TASKS: Task[] = [
 
 const GlassCard = ({ children, className = '', hover = true }: { children: React.ReactNode; className?: string; hover?: boolean }) => (
   <motion.div
-    className={`relative overflow-hidden rounded-2xl ${className}`}
-    style={{
-      background: 'linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.05) 100%)',
-      backdropFilter: 'blur(20px)',
-      WebkitBackdropFilter: 'blur(20px)',
-      border: '1px solid rgba(255,255,255,0.15)',
-      boxShadow: '0 8px 32px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.1)'
-    }}
-    whileHover={hover ? { scale: 1.02, boxShadow: '0 12px 40px rgba(0,0,0,0.4)' } : {}}
+    className={`glass-card relative overflow-hidden rounded-2xl ${className}`}
+    whileHover={hover ? { scale: 1.02 } : {}}
     transition={{ duration: 0.2 }}
   >
-    <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent pointer-events-none" />
+    <div className="glass-shimmer absolute inset-0 pointer-events-none" />
     <div className="relative z-10">{children}</div>
   </motion.div>
 )
@@ -108,12 +101,8 @@ const TaskCard = ({ task, onClick }: { task: Task; onClick: () => void }) => {
       exit={{ opacity: 0, scale: 0.9 }}
       whileHover={{ y: -4, boxShadow: '0 20px 40px rgba(0,0,0,0.3)' }}
       onClick={onClick}
-      className="cursor-pointer rounded-xl p-4 mb-3"
-      style={{
-        background: 'linear-gradient(135deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.02) 100%)',
-        border: `1px solid ${PRIORITY_CONFIG[task.priority].color}30`,
-        backdropFilter: 'blur(10px)'
-      }}
+      className="glass-task cursor-pointer rounded-xl p-4 mb-3"
+      style={{ border: `1px solid ${PRIORITY_CONFIG[task.priority].color}30` }}
     >
       <div className="flex items-start justify-between mb-3">
         <div className="flex items-center gap-2">
@@ -351,17 +340,17 @@ export default function ProjectManager() {
         <motion.div
           animate={{ x: [0, 100, 0], y: [0, -50, 0] }}
           transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
-          className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-500/20 rounded-full blur-3xl"
+          className="orb orb-blue top-1/4 left-1/4 w-96 h-96"
         />
         <motion.div
           animate={{ x: [0, -80, 0], y: [0, 80, 0] }}
           transition={{ duration: 25, repeat: Infinity, ease: "linear" }}
-          className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-500/20 rounded-full blur-3xl"
+          className="orb orb-purple bottom-1/4 right-1/4 w-96 h-96"
         />
         <motion.div
           animate={{ x: [0, 50, 0], y: [0, 100, 0] }}
           transition={{ duration: 30, repeat: Infinity, ease: "linear" }}
-          className="absolute top-1/2 right-1/3 w-64 h-64 bg-cyan-500/20 rounded-full blur-3xl"
+          className="orb orb-cyan top-1/2 right-1/3 w-64 h-64"
         />
       </div>
 
@@ -373,7 +362,7 @@ export default function ProjectManager() {
           className="flex flex-col lg:flex-row items-start lg:items-center justify-between mb-8 gap-4"
         >
           <div>
-            <h1 className="text-4xl lg:text-5xl font-bold bg-gradient-to-r from-white via-blue-200 to-cyan-400 bg-clip-text text-transparent">
+            <h1 className="text-4xl lg:text-5xl font-bold gradient-title">
               Project Management
             </h1>
             <p className="text-gray-400 mt-2 text-lg">Manage tasks, track progress, collaborate with your AI team</p>
@@ -395,7 +384,7 @@ export default function ProjectManager() {
                   onClick={() => setViewMode(key as ViewMode)}
                   className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-all flex items-center gap-2 ${
                     viewMode === key
-                      ? 'bg-gradient-to-r from-blue-500 to-cyan-500 text-white shadow-lg shadow-blue-500/30'
+                      ? 'tab-active text-white'
                       : 'text-gray-400 hover:text-white hover:bg-white/10'
                   }`}
                 >
@@ -409,11 +398,7 @@ export default function ProjectManager() {
             <motion.button
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
-              className="px-6 py-3 rounded-xl font-medium text-white shadow-lg"
-              style={{
-                background: 'linear-gradient(135deg, #3B82F6 0%, #8B5CF6 100%)',
-                boxShadow: '0 8px 32px rgba(59, 130, 246, 0.4)'
-              }}
+              className="btn-gradient px-6 py-3 rounded-xl font-medium text-white"
             >
               + Add Task
             </motion.button>
@@ -629,8 +614,7 @@ export default function ProjectManager() {
                     <motion.button
                       whileHover={{ scale: 1.02 }}
                       whileTap={{ scale: 0.98 }}
-                      className="flex-1 py-3.5 rounded-xl font-medium text-white"
-                      style={{ background: 'linear-gradient(135deg, #3B82F6 0%, #8B5CF6 100%)' }}
+                      className="btn-gradient flex-1 py-3.5 rounded-xl font-medium text-white"
                     >
                       Edit Task
                     </motion.button>

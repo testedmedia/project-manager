@@ -1,37 +1,143 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
 
+/* ============================================
+   THEME & VARIABLES
+   ============================================ */
 :root {
   --background: #0a0a0a;
   --foreground: #ededed;
 }
 
+/* ============================================
+   BASE STYLES
+   ============================================ */
 body {
-  background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 50%, #0a0a0a 100%);
+  background: linear-gradient(135deg, #0a0a1a 0%, #1a1a3e 50%, #0a0a1a 100%);
   color: var(--foreground);
   min-height: 100vh;
 }
 
-/* Glass effect */
-.glass {
-  background: rgba(255, 255, 255, 0.05);
+/* ============================================
+   GLASSMORPHISM EFFECTS
+   ============================================ */
+.glass-card {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 100%);
+  -webkit-backdrop-filter: blur(20px);
   backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
-/* Scrollbar */
+.glass-card:hover {
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.glass-task {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.02) 100%);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+
+/* Glass shimmer overlay */
+.glass-shimmer {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, transparent 100%);
+}
+
+/* ============================================
+   GRADIENT TEXT
+   ============================================ */
+.gradient-title {
+  background: linear-gradient(to right, #ffffff, #bfdbfe, #22d3ee);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* ============================================
+   ANIMATED BACKGROUND ORBS
+   ============================================ */
+.orb {
+  border-radius: 9999px;
+  position: absolute;
+}
+
+.orb-blue {
+  background: rgba(59, 130, 246, 0.2);
+  filter: blur(64px);
+  -webkit-filter: blur(64px);
+}
+
+.orb-purple {
+  background: rgba(168, 85, 247, 0.2);
+  filter: blur(64px);
+  -webkit-filter: blur(64px);
+}
+
+.orb-cyan {
+  background: rgba(34, 211, 238, 0.2);
+  filter: blur(64px);
+  -webkit-filter: blur(64px);
+}
+
+/* ============================================
+   BUTTONS & INTERACTIVE
+   ============================================ */
+.btn-gradient {
+  background: linear-gradient(135deg, #3B82F6 0%, #8B5CF6 100%);
+  box-shadow: 0 8px 32px rgba(59, 130, 246, 0.4);
+}
+
+.btn-gradient:hover {
+  box-shadow: 0 12px 40px rgba(59, 130, 246, 0.5);
+}
+
+.tab-active {
+  background: linear-gradient(to right, #3B82F6, #06B6D4);
+  box-shadow: 0 4px 20px rgba(59, 130, 246, 0.3);
+}
+
+/* ============================================
+   GLOW EFFECTS
+   ============================================ */
+.glow-blue {
+  box-shadow: 0 0 20px rgba(0, 212, 255, 0.5);
+}
+
+.glow-pulse {
+  animation: glow-pulse 2s ease-in-out infinite;
+}
+
+@keyframes glow-pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+/* ============================================
+   SCROLLBAR
+   ============================================ */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
+
 ::-webkit-scrollbar-track {
   background: rgba(255, 255, 255, 0.05);
 }
+
 ::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.2);
   border-radius: 4px;
 }
+
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.3);
 }
+
+/* ============================================
+   STATUS COLORS - KANBAN
+   ============================================ */
+.status-backlog { background: rgba(107, 114, 128, 0.2); border-color: rgba(107, 114, 128, 0.3); }
+.status-todo { background: rgba(59, 130, 246, 0.2); border-color: rgba(59, 130, 246, 0.3); }
+.status-in-progress { background: rgba(245, 158, 11, 0.2); border-color: rgba(245, 158, 11, 0.3); }
+.status-review { background: rgba(139, 92, 246, 0.2); border-color: rgba(139, 92, 246, 0.3); }
+.status-done { background: rgba(16, 185, 129, 0.2); border-color: rgba(16, 185, 129, 0.3); }
